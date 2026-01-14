@@ -442,8 +442,8 @@ function confirmAndGoHome() {
           </div>
 
           <div class="bg-white rounded-xl shadow-md p-4 text-center">
-            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Scanned Products</div>
-            <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">{{ store.scannedProductsCurrent }}</div>
+            <div class="text-xs text-gray-500 tracking-wide">Scanned Products</div>
+            <div class="mt-2 text-2xl font-semibold text-[#004aad]">{{ store.scannedProductsCurrent }}</div>
           </div>
 
           <div class="bg-white rounded-xl shadow-md px-4 py-5 text-center">
