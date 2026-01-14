@@ -438,7 +438,7 @@ function confirmAndGoHome() {
         <div class="grid grid-cols-2 sm:grid-cols-2 gap-4 sm:gap-8 py-6">
           <div class="bg-white rounded-xl shadow-md px-4 py-5 text-center">
             <div class="text-xs text-gray-500">No of Products</div>
-            <div class="mt-2 text-xl font-semibold text-[#004aad]">{{ store.current.expectedQty }}</div>
+            <div class="mt-2 text-2xl font-semibold text-[#004aad]">{{ store.current.expectedQty }}</div>
           </div>
 
           <div class="bg-white rounded-xl shadow-md p-4 text-center">
@@ -448,12 +448,12 @@ function confirmAndGoHome() {
 
           <div class="bg-white rounded-xl shadow-md px-4 py-5 text-center">
             <div class="text-xs text-gray-500">Scanned Innerboxes</div>
-            <div class="mt-2 text-xl font-semibold text-[#004aad]">{{ store.scannedInnerboxesCount }}</div>
+            <div class="mt-2 text-2xl font-semibold text-[#004aad]">{{ store.scannedInnerboxesCount }}</div>
           </div>
 
           <div class="bg-white rounded-xl shadow-md px-4 py-5 text-center">
             <div class="text-xs text-gray-500">All Products Count</div>
-            <div class="mt-2 text-xl font-semibold text-[#004aad]">{{ store.allProductsCountIncludingCurrent }}</div>
+            <div class="mt-2 text-2xl font-semibold text-[#004aad]">{{ store.allProductsCountIncludingCurrent }}</div>
           </div>
         </div>
 
