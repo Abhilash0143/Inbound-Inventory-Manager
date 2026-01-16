@@ -319,7 +319,7 @@ function confirmAndGoHome() {
           </div>
 
           <div class="bg-white rounded-xl shadow-md p-4 text-center">
-            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Scanned Products</div>
+            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Currently Scanned</div>
             <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">{{ store.scannedProductsCurrent }}</div>
           </div>
 
@@ -329,7 +329,7 @@ function confirmAndGoHome() {
           </div>
 
           <div class="bg-white rounded-xl shadow-md p-4 text-center">
-            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Total Quantity</div>
+            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Total Products</div>
             <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">{{ store.allProductsCountIncludingCurrent
               }}</div>
           </div>
@@ -419,7 +419,7 @@ function confirmAndGoHome() {
           </div>
 
           <div class="bg-white rounded-xl shadow-md p-4 text-center">
-            <div class="text-xs text-gray-500 tracking-wide">Scanned Products</div>
+            <div class="text-xs text-gray-500 tracking-wide">Currently Scanned</div>
             <div class="mt-2 text-2xl font-semibold text-[#004aad]">{{ store.scannedProductsCurrent }}</div>
           </div>
 
