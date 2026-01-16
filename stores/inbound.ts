@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
+import { isValidSku } from '../utils/skuValidator'
+
 
 export type InnerBox = {
   innerBoxId: string
   expectedQty: number
-  sku: string
-  serials: string[]
+  items: ScannedItem[]
   verifiedAt: string
 }
 
@@ -14,19 +15,30 @@ export type Session = {
   innerBoxes: InnerBox[]
 }
 
+export type ScannedItem = {
+  sku: string
+  serial: string
+}
+
+
 const todayISO = () => new Date().toISOString().slice(0, 10)
+
 
 export const useInboundStore = defineStore('inbound', {
   state: () => ({
     session: null as Session | null,
 
+    skuValidated: false as boolean,
+    lockedSku: '' as string,
+
     // current (in-progress) innerbox
     current: {
-      innerBoxId: '',
-      expectedQty: 0,
-      sku: '' as string,
-      serials: [] as string[],
-    },
+  innerBoxId: '',
+  expectedQty: 0,
+  sku: '',
+  items: [] as { sku: string; serial: string }[],
+},
+
 
     error: '' as string,
     success: '' as string,
@@ -39,11 +51,11 @@ export const useInboundStore = defineStore('inbound', {
 
     allProductsCount: (s) => {
       const done = s.session?.innerBoxes ?? []
-      const doneCount = done.reduce((sum, b) => sum + b.serials.length, 0)
+      const doneCount = done.reduce((sum, b) => sum + b.items.length, 0)
       return doneCount
     },
 
-    scannedProductsCurrent: (s) => s.current.serials.length,
+    scannedProductsCurrent: (s) => s.current.items.length,
 
     // total products (done + current)
     allProductsCountIncludingCurrent(): number {
@@ -52,23 +64,33 @@ export const useInboundStore = defineStore('inbound', {
 
     // unique serial across outerbox (recommended)
     allSerialsSet: (s) => {
-      const set = new Set<string>()
-      for (const b of s.session?.innerBoxes ?? []) for (const sn of b.serials) set.add(sn)
-      for (const sn of s.current.serials) set.add(sn)
-      return set
-    },
+  const set = new Set<string>()
+  for (const b of s.session?.innerBoxes ?? []) {
+    for (const it of b.items) set.add(it.serial)
+  }
+  for (const it of s.current.items) set.add(it.serial)
+  return set
+},
+
 
     canGoScan: (s) => !!s.session?.outerBoxId && !!s.current.innerBoxId && s.current.expectedQty > 0,
 
     canGoConfirm: (s) =>
-      s.current.expectedQty > 0 &&
-      s.current.sku.trim().length > 0 &&
-      s.current.serials.length === s.current.expectedQty,
+  s.current.expectedQty > 0 &&
+  s.current.items.length === s.current.expectedQty,
+
 
     canFinishInnerbox(): boolean {
       // confirm button condition (same as canGoConfirm)
       return this.canGoConfirm
     },
+
+    canScanSerial: (s) =>
+  !!s.current.innerBoxId &&
+  s.current.expectedQty > 0 &&
+  s.skuValidated &&
+  !!s.current.sku,
+
   },
 
   actions: {
@@ -130,62 +152,112 @@ beginInnerbox(innerBoxId: string, expectedQty: number) {
 
   this.current.innerBoxId = inner
   this.current.expectedQty = qty
-  this.current.sku = ''
-  this.current.serials = []
+this.current.sku = ''
+this.current.items = []
+this.skuValidated = false
+this.lockedSku = ''
+
   this.clearMessages()
 },
 
 
     setSku(incoming: string) {
-      const sku = incoming.trim()
-      if (!sku) return
+  const sku = incoming.trim().toUpperCase()
+  if (!sku) return false
 
-      // lock behavior
-      if (this.current.sku && this.current.sku !== sku) {
-        this.error = `SKU locked for this InnerBox: ${this.current.sku}. You entered: ${sku}`
-        return
-      }
+  // must be a valid SKU from list
+  if (!isValidSku(sku)) {
+    this.skuValidated = false
+    this.error = `Invalid SKU: "${sku}"`
+    return false
+  }
 
-      this.current.sku = sku
-      this.error = ''
-    },
+  // first time: lock SKU for this innerbox
+  if (!this.lockedSku) {
+    this.lockedSku = sku
+  }
+
+  // subsequent scans: must match locked SKU
+  if (sku !== this.lockedSku) {
+    this.skuValidated = false
+    this.error = `SKU mismatch. Locked SKU is ${this.lockedSku}. You scanned ${sku}`
+    return false
+  }
+
+  // ✅ OK for this cycle
+  this.current.sku = sku
+  this.skuValidated = true
+  this.error = ''
+  return true
+},
+
+
 
     addSerial(incoming: string) {
-      const sn = incoming.trim()
-      if (!sn) return
+  const sn = incoming.trim().toUpperCase()
+  if (!sn) return false
 
-      if (!this.current.sku.trim()) {
-        this.error = 'Enter SKU first.'
-        return
-      }
+  if (!this.skuValidated || !this.lockedSku) {
+  this.error = 'Scan valid SKU first.'
+  return false
+}
 
-      // prevent beyond expected qty
-      if (this.current.serials.length >= this.current.expectedQty) {
-        this.error = `Quantity already reached (${this.current.expectedQty}).`
-        return
-      }
 
-      // unique within current innerbox
-      if (this.current.serials.includes(sn)) {
-        this.error = `Duplicate serial in this InnerBox: ${sn}`
-        return
-      }
+  if (!this.current.sku.trim()) {
+    this.error = 'Enter SKU first.'
+    return false
+  }
 
-      // unique across entire outerbox
-      for (const b of this.session?.innerBoxes ?? []) {
-        if (b.serials.includes(sn)) {
-          this.error = `Serial already used in this OuterBox: ${sn}`
-          return
-        }
-      }
+  if (sn === this.current.sku.toUpperCase()) {
+    this.error = 'Serial number cannot be the same as SKU.'
+    return false
+  }
 
-      this.current.serials.push(sn)
-      this.error = ''
-    },
+  if (this.current.items.length >= this.current.expectedQty) {
+    this.error = `Quantity already reached (${this.current.expectedQty}).`
+    return false
+  }
 
-    removeSerial(sn: string) {
-      this.current.serials = this.current.serials.filter(x => x !== sn)
-    },
+  if (this.current.items.some(i => i.serial === sn)) {
+    this.error = `Duplicate serial in this InnerBox: ${sn}`
+    return false
+  }
+
+  for (const b of this.session?.innerBoxes ?? []) {
+  if (b.items.some(i => i.serial === sn)) {
+    this.error = `Serial already used in this OuterBox: ${sn}`
+    return false
+  }
+}
+
+
+  this.current.items.push({
+  sku: this.lockedSku,
+  serial: sn,
+})
+
+
+  this.error = ''
+  return true
+},
+
+nextProduct() {
+  // Move to next scan cycle (new SKU required)
+  this.current.sku = ''
+  this.skuValidated = false
+
+  // ✅ DO NOT clear serials here, or you'll lose what you just saved
+  // this.current.serials = []  ❌ remove this
+
+  this.error = ''
+  this.success = ''
+},
+
+
+    removeSerial(serial: string) {
+  this.current.items = this.current.items.filter(i => i.serial !== serial)
+},
+
 
     confirmInnerbox() {
       if (!this.session) {
@@ -198,12 +270,12 @@ beginInnerbox(innerBoxId: string, expectedQty: number) {
       }
 
       this.session.innerBoxes.push({
-        innerBoxId: this.current.innerBoxId,
-        expectedQty: this.current.expectedQty,
-        sku: this.current.sku,
-        serials: [...this.current.serials],
-        verifiedAt: new Date().toISOString(),
-      })
+  innerBoxId: this.current.innerBoxId,
+  expectedQty: this.current.expectedQty,
+  items: [...this.current.items],
+  verifiedAt: new Date().toISOString(),
+})
+
 
       this.success = 'Verified & Confirmed. Thank you!'
       this.error = ''
@@ -216,8 +288,11 @@ beginInnerbox(innerBoxId: string, expectedQty: number) {
         innerBoxId: '',
         expectedQty: 0,
         sku: '',
-        serials: [],
+        items: [],
       }
+      this.lockedSku = ''
+this.skuValidated = false
+
       this.clearMessages()
     },
 

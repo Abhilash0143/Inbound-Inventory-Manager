@@ -121,19 +121,18 @@ function onSkuEnter() {
 }
 
 function onSerialEnter() {
-  store.addSerial(serialInput.value)
+  const ok = store.addSerial(serialInput.value)
 
-  if (store.error) {
+  if (!ok) {
     nextTick(() => serialEl.value?.focus())
     return
   }
 
-  // Serial accepted → clear SN and clear SKU ONLY after serial scan
   serialInput.value = ''
-  skuInput.value = ''
-
+  skuInput.value = ''           
   nextTick(() => skuEl.value?.focus())
 }
+
 
 function resetCurrentInnerbox() {
   store.resetCurrentInnerbox()
@@ -241,14 +240,14 @@ function confirmAndGoHome() {
             <span class="text-lg sm:text-base font-semibold tracking-wide">NEW PACKAGE</span>
           </button>
 
-          <button
+          <!-- <button
             class="w-full sm:w-72 h-24 rounded-xl border border-gray-300 bg-white
                    shadow-md hover:shadow-xl hover:-translate-y-0.5 transition
                    flex items-center justify-center"
             @click="() => {}"
           >
             <span class="text-lg sm:text-base font-semibold tracking-wide">DRAFTS</span>
-          </button>
+          </button> -->
         </div>
       </div>
     </div>
@@ -268,7 +267,7 @@ function confirmAndGoHome() {
           </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-10 items-end justify-items-stretch md:justify-items-center py-6">
+        <div class="grid grid-cols-1 md:grid-cols-1 gap-4 md:gap-10 items-end justify-items-stretch md:justify-items-center py-6">
           <div class="w-full md:max-w-xs text-center">
             <div class="text-xs mb-2">Scan or Type the Outer Box ID</div>
             <input
@@ -285,6 +284,7 @@ function confirmAndGoHome() {
             <input
               ref="innerEl"
               v-model="innerBoxInput"
+              :disabled="!outerBoxInput.trim()"
               class="w-full border border-gray-700 px-3 py-2 text-center outline-none rounded-md bg-white"
               placeholder="Inner Box ID"
               @keydown.enter.prevent="qtyEl?.focus()"
@@ -292,10 +292,11 @@ function confirmAndGoHome() {
           </div>
 
           <div class="w-full md:max-w-[140px] text-center">
-            <div class="text-xs mb-2">Quantity</div>
+            <div class="text-xs mb-2">Product Quantity</div>
             <input
               ref="qtyEl"
               v-model.number="qtyInput"
+              :disabled="!innerBoxInput.trim()"
               type="number"
               min="1"
               class="w-full border border-gray-700 px-3 py-2 text-center outline-none rounded-md bg-white"
@@ -337,7 +338,7 @@ function confirmAndGoHome() {
 
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-6 py-6">
           <div class="bg-white rounded-xl shadow-md p-4 text-center">
-            <div class="text-[11px] text-gray-500 uppercase tracking-wide">No of Products</div>
+            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Entered Quantity</div>
             <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">{{ store.current.expectedQty }}</div>
           </div>
 
@@ -352,7 +353,7 @@ function confirmAndGoHome() {
           </div>
 
           <div class="bg-white rounded-xl shadow-md p-4 text-center">
-            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Total Products</div>
+            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Total Quantity</div>
             <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">{{ store.allProductsCountIncludingCurrent }}</div>
           </div>
         </div>
@@ -377,24 +378,41 @@ function confirmAndGoHome() {
             <input
               ref="serialEl"
               v-model="serialInput"
-              class="w-full border border-gray-700 px-3 py-2 text-center outline-none text-sm rounded-md bg-white"
+              :disabled="!store.canScanSerial"
+              class="w-full border border-gray-700 px-3 py-2 text-center outline-none text-sm rounded-md bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
               placeholder="Scan/Type Serial"
               @keydown.enter.prevent="onSerialEnter"
             />
           </div>
 
           <div class="w-full md:max-w-xs">
-            <div class="text-xs mb-2 text-left">Scanned Serials</div>
-            <div class="border border-gray-200 p-2 h-28 overflow-auto text-xs rounded-lg">
-              <div v-for="sn in store.current.serials" :key="sn" class="flex items-center justify-between border-b py-1">
-                <span class="font-mono">{{ sn }}</span>
-                <button class="text-[11px] underline" @click="store.removeSerial(sn)">remove</button>
-              </div>
-              <div v-if="store.current.serials.length === 0" class="text-gray-400 text-center py-6">
-                No serials yet
-              </div>
-            </div>
-          </div>
+  <div class="text-xs mb-2 text-left">Scanned Products</div>
+
+  <div class="border border-gray-200 p-2 h-28 overflow-auto text-xs rounded-lg">
+    <div
+      v-for="item in store.current.items"
+      :key="item.serial"
+      class="flex items-center justify-between border-b py-1"
+    >
+      <div class="flex flex-col">
+        <span class="font-semibold">SKU: {{ item.sku }}</span>
+        <span class="font-mono text-gray-600">SN: {{ item.serial }}</span>
+      </div>
+
+      <button
+        class="text-[11px] underline"
+        @click="store.removeSerial(item.serial)"
+      >
+        remove
+      </button>
+    </div>
+
+    <div v-if="store.current.items.length === 0" class="text-gray-400 text-center py-6">
+      No products yet
+    </div>
+  </div>
+</div>
+
         </div>
 
         <div class="flex flex-col sm:flex-row justify-center gap-3 sm:gap-6 py-6">
