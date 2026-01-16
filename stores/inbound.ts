@@ -27,9 +27,10 @@ const todayISO = () => new Date().toISOString().slice(0, 10)
 export const useInboundStore = defineStore('inbound', {
   state: () => ({
     session: null as Session | null,
-
+    scanCompleted: false as boolean,
     skuValidated: false as boolean,
     lockedSku: '' as string,
+    scanLocked: false as boolean,
 
     // current (in-progress) innerbox
     current: {
@@ -75,9 +76,8 @@ export const useInboundStore = defineStore('inbound', {
 
     canGoScan: (s) => !!s.session?.outerBoxId && !!s.current.innerBoxId && s.current.expectedQty > 0,
 
-    canGoConfirm: (s) =>
-  s.current.expectedQty > 0 &&
-  s.current.items.length === s.current.expectedQty,
+    canGoConfirm: (s) => s.scanCompleted === true,
+
 
 
     canFinishInnerbox(): boolean {
@@ -156,6 +156,8 @@ this.current.sku = ''
 this.current.items = []
 this.skuValidated = false
 this.lockedSku = ''
+this.scanCompleted = false
+this.scanLocked = false
 
   this.clearMessages()
 },
@@ -213,10 +215,10 @@ this.lockedSku = ''
     return false
   }
 
-  if (this.current.items.length >= this.current.expectedQty) {
-    this.error = `Quantity already reached (${this.current.expectedQty}).`
-    return false
-  }
+  // if (this.current.items.length >= this.current.expectedQty) {
+  //   this.error = `Quantity already reached (${this.current.expectedQty}).`
+  //   return false
+  // }
 
   if (this.current.items.some(i => i.serial === sn)) {
     this.error = `Duplicate serial in this InnerBox: ${sn}`
@@ -241,6 +243,40 @@ this.lockedSku = ''
   return true
 },
 
+scanComplete() {
+    this.scanLocked = true
+  if (!this.session) {
+    this.error = 'No active session.'
+    return false
+  }
+
+  if (!this.current.innerBoxId) {
+    this.error = 'Inner Box ID is required.'
+    return false
+  }
+
+  if (this.current.expectedQty <= 0) {
+    this.error = 'Expected quantity must be greater than 0.'
+    return false
+  }
+
+  const scanned = this.current.items.length
+  const expected = this.current.expectedQty
+
+  if (scanned !== expected) {
+    this.error = `Quantity Mismatched: scanned ${scanned} of ${expected}.\n Please Reset`
+    return false
+  }
+
+
+  this.skuValidated = false        // no more scanning
+  this.current.sku = ''   
+  this.scanCompleted = true
+  this.error = ''
+  this.success = 'Scan complete. Quantity matched.'
+  return true
+},
+
 nextProduct() {
   // Move to next scan cycle (new SKU required)
   this.current.sku = ''
@@ -251,11 +287,6 @@ nextProduct() {
 
   this.error = ''
   this.success = ''
-},
-
-
-    removeSerial(serial: string) {
-  this.current.items = this.current.items.filter(i => i.serial !== serial)
 },
 
 
@@ -292,6 +323,7 @@ nextProduct() {
       }
       this.lockedSku = ''
 this.skuValidated = false
+this.scanLocked = false
 
       this.clearMessages()
     },

@@ -129,7 +129,7 @@ function onSerialEnter() {
   }
 
   serialInput.value = ''
-  skuInput.value = ''           
+  skuInput.value = ''
   nextTick(() => skuEl.value?.focus())
 }
 
@@ -231,23 +231,12 @@ function confirmAndGoHome() {
         </div>
 
         <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-4 sm:gap-8">
-          <button
-            class="w-full sm:w-72 h-24 rounded-xl border border-gray-300 bg-white
+          <button class="w-full sm:w-72 h-24 rounded-xl border border-gray-300 bg-white
                    shadow-md hover:shadow-xl hover:-translate-y-0.5 transition
-                   flex items-center justify-center"
-            @click="goNewPackage"
-          >
+                   flex items-center justify-center" @click="goNewPackage">
             <span class="text-lg sm:text-base font-semibold tracking-wide">NEW PACKAGE</span>
           </button>
 
-          <!-- <button
-            class="w-full sm:w-72 h-24 rounded-xl border border-gray-300 bg-white
-                   shadow-md hover:shadow-xl hover:-translate-y-0.5 transition
-                   flex items-center justify-center"
-            @click="() => {}"
-          >
-            <span class="text-lg sm:text-base font-semibold tracking-wide">DRAFTS</span>
-          </button> -->
         </div>
       </div>
     </div>
@@ -267,51 +256,38 @@ function confirmAndGoHome() {
           </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-1 gap-4 md:gap-10 items-end justify-items-stretch md:justify-items-center py-6">
+        <div
+          class="grid grid-cols-1 md:grid-cols-1 gap-4 md:gap-10 items-end justify-items-stretch md:justify-items-center py-6">
           <div class="w-full md:max-w-xs text-center">
             <div class="text-xs mb-2">Scan or Type the Outer Box ID</div>
-            <input
-              ref="outerEl"
-              v-model="outerBoxInput"
+            <input ref="outerEl" v-model="outerBoxInput"
               class="w-full border border-gray-700 px-3 py-2 text-center outline-none rounded-md bg-white"
-              placeholder="Outer Box ID"
-              @keydown.enter.prevent="innerEl?.focus()"
-            />
+              placeholder="Outer Box ID" @keydown.enter.prevent="innerEl?.focus()" />
           </div>
 
           <div class="w-full md:max-w-xs text-center">
             <div class="text-xs mb-2">Scan or Type the Inner Box ID</div>
-            <input
-              ref="innerEl"
-              v-model="innerBoxInput"
-              :disabled="!outerBoxInput.trim()"
+            <input ref="innerEl" v-model="innerBoxInput" :disabled="!outerBoxInput.trim()"
               class="w-full border border-gray-700 px-3 py-2 text-center outline-none rounded-md bg-white"
-              placeholder="Inner Box ID"
-              @keydown.enter.prevent="qtyEl?.focus()"
-            />
+              placeholder="Inner Box ID" @keydown.enter.prevent="qtyEl?.focus()" />
           </div>
 
           <div class="w-full md:max-w-[140px] text-center">
             <div class="text-xs mb-2">Product Quantity</div>
-            <input
-              ref="qtyEl"
-              v-model.number="qtyInput"
-              :disabled="!innerBoxInput.trim()"
-              type="number"
-              min="1"
+            <input ref="qtyEl" v-model.number="qtyInput" :disabled="!innerBoxInput.trim()" type="number" min="1"
               class="w-full border border-gray-700 px-3 py-2 text-center outline-none rounded-md bg-white"
-              placeholder="0"
-              @keydown.enter.prevent="onNewPackageNext"
-            />
+              placeholder="0" @keydown.enter.prevent="onNewPackageNext" />
           </div>
         </div>
 
         <div class="flex flex-col sm:flex-row justify-center gap-3 sm:gap-6 py-6">
-          <button class="w-full sm:w-28 rounded bg-gray-800 text-white py-2 text-sm hover:opacity-90" @click="onNewPackageNext">
+          <button class="w-full sm:w-28 rounded bg-gray-800 text-white py-2 text-sm hover:opacity-90"
+            @click="onNewPackageNext">
             Next
           </button>
 
-          <button class="w-full sm:w-28 rounded bg-orange-500 text-white py-2 text-sm hover:opacity-90" @click="confirmResetNewPackageForm">
+          <button class="w-full sm:w-28 rounded bg-orange-500 text-white py-2 text-sm hover:opacity-90"
+            @click="confirmResetNewPackageForm">
             Reset
           </button>
         </div>
@@ -354,20 +330,18 @@ function confirmAndGoHome() {
 
           <div class="bg-white rounded-xl shadow-md p-4 text-center">
             <div class="text-[11px] text-gray-500 uppercase tracking-wide">Total Quantity</div>
-            <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">{{ store.allProductsCountIncludingCurrent }}</div>
+            <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">{{ store.allProductsCountIncludingCurrent
+              }}</div>
           </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-10 items-start justify-items-stretch md:justify-items-center py-2">
+        <div
+          class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-10 items-start justify-items-stretch md:justify-items-center py-2">
           <div class="w-full md:max-w-xs text-left">
             <div class="text-xs mb-2">Product SKU</div>
-            <input
-              ref="skuEl"
-              v-model="skuInput"
-              class="w-full border border-gray-700 px-3 py-2 text-center outline-none text-sm rounded-md bg-white"
-              placeholder="Scan/Type SKU"
-              @keydown.enter.prevent="onSkuEnter"
-            />
+            <input ref="skuEl" v-model="skuInput" :disabled="store.scanLocked"
+              class="w-full border border-gray-700 px-3 py-2 text-center outline-none text-sm rounded-md bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+              placeholder="Scan/Type SKU" @keydown.enter.prevent="onSkuEnter" />
             <div v-if="store.current.sku" class="mt-1 text-[11px] text-gray-600">
               Locked SKU: <span class="font-semibold">{{ store.current.sku }}</span>
             </div>
@@ -375,60 +349,45 @@ function confirmAndGoHome() {
 
           <div class="w-full md:max-w-xs text-left">
             <div class="text-xs mb-2">Product Serial Number</div>
-            <input
-              ref="serialEl"
-              v-model="serialInput"
-              :disabled="!store.canScanSerial"
+            <input ref="serialEl" v-model="serialInput" :disabled="store.scanLocked || !store.canScanSerial"
               class="w-full border border-gray-700 px-3 py-2 text-center outline-none text-sm rounded-md bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
-              placeholder="Scan/Type Serial"
-              @keydown.enter.prevent="onSerialEnter"
-            />
+              placeholder="Scan/Type Serial" @keydown.enter.prevent="onSerialEnter" />
           </div>
 
           <div class="w-full md:max-w-xs">
-  <div class="text-xs mb-2 text-left">Scanned Products</div>
+            <div class="text-xs mb-2 text-left">Scanned Products</div>
 
-  <div class="border border-gray-200 p-2 h-28 overflow-auto text-xs rounded-lg">
-    <div
-      v-for="item in store.current.items"
-      :key="item.serial"
-      class="flex items-center justify-between border-b py-1"
-    >
-      <div class="flex flex-col">
-        <span class="font-semibold">SKU: {{ item.sku }}</span>
-        <span class="font-mono text-gray-600">SN: {{ item.serial }}</span>
-      </div>
+            <div class="border border-gray-200 p-2 h-28 overflow-auto text-xs rounded-lg">
+              <div v-for="item in store.current.items" :key="item.serial"
+                class="flex items-center justify-between border-b py-1">
+                <div class="flex flex-col">
+                  <span class="font-semibold">SKU: {{ item.sku }}</span>
+                  <span class="font-mono text-gray-600">SN: {{ item.serial }}</span>
+                </div>
+                </div>
 
-      <button
-        class="text-[11px] underline"
-        @click="store.removeSerial(item.serial)"
-      >
-        remove
-      </button>
-    </div>
-
-    <div v-if="store.current.items.length === 0" class="text-gray-400 text-center py-6">
-      No products yet
-    </div>
-  </div>
-</div>
+              <div v-if="store.current.items.length === 0" class="text-gray-400 text-center py-6">
+                No products yet
+              </div>
+            </div>
+          </div>
 
         </div>
 
+        <button class="px-4 py-2 rounded-md bg-blue-600 text-white disabled:opacity-50"
+          :disabled="store.current.items.length === 0" @click="store.scanComplete()">
+          Scan Complete
+        </button>
+
         <div class="flex flex-col sm:flex-row justify-center gap-3 sm:gap-6 py-6">
-          <button
-            class="w-full sm:w-28 rounded py-2 text-sm text-white"
+          <button class="w-full sm:w-28 rounded py-2 text-sm text-white"
             :class="store.canGoConfirm ? 'bg-gray-800 hover:opacity-90' : 'bg-gray-400 cursor-not-allowed'"
-            :disabled="!store.canGoConfirm"
-            @click="scanNext"
-          >
+            :disabled="!store.canGoConfirm" @click="scanNext">
             Next
           </button>
 
-          <button
-            class="w-full sm:w-28 rounded bg-orange-500 text-white py-2 text-sm hover:opacity-90"
-            @click="confirmResetCurrentInnerbox"
-          >
+          <button class="w-full sm:w-28 rounded bg-orange-500 text-white py-2 text-sm hover:opacity-90"
+            @click="confirmResetCurrentInnerbox">
             Reset
           </button>
         </div>
@@ -480,24 +439,18 @@ function confirmAndGoHome() {
         </div>
 
         <div class="flex flex-col sm:flex-row justify-center gap-3 sm:gap-6 py-6">
-          <button
-            class="w-full sm:w-28 rounded bg-orange-500 text-white py-2 text-sm hover:opacity-90"
-            @click="confirmResetOnConfirmPage"
-          >
+          <button class="w-full sm:w-28 rounded bg-orange-500 text-white py-2 text-sm hover:opacity-90"
+            @click="confirmResetOnConfirmPage">
             Reset
           </button>
 
-          <button
-            class="w-full sm:w-40 rounded bg-gray-800 text-white py-2 text-sm hover:opacity-90"
-            @click="confirmNextInnerbox"
-          >
+          <button class="w-full sm:w-40 rounded bg-gray-800 text-white py-2 text-sm hover:opacity-90"
+            @click="confirmNextInnerbox">
             Next InnerBox
           </button>
 
-          <button
-            class="w-full sm:w-28 rounded border border-gray-700 py-2 text-sm hover:bg-gray-50"
-            @click="confirmAndGoHome"
-          >
+          <button class="w-full sm:w-28 rounded border border-gray-700 py-2 text-sm hover:bg-gray-50"
+            @click="confirmAndGoHome">
             Home
           </button>
         </div>
