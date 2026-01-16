@@ -1,0 +1,76 @@
+/* ===============================
+   PRIMEVUE TOAST (Custom Styled)
+================================ */
+
+.p-toast {
+  z-index: 9999;
+}
+
+.p-toast-message {
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+  font-size: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+/* Error */
+.p-toast-message-error {
+  background: #fee2e2;
+  border-left: 5px solid #dc2626;
+  color: #7f1d1d;
+}
+
+/* Success */
+.p-toast-message-success {
+  background: #dcfce7;
+  border-left: 5px solid #16a34a;
+  color: #14532d;
+}
+
+/* Info */
+.p-toast-message-info {
+  background: #e0f2fe;
+  border-left: 5px solid #0284c7;
+  color: #075985;
+}
+
+/* ===============================
+   CONFIRM DIALOG
+================================ */
+
+.p-confirm-dialog {
+  border-radius: 12px;
+  padding: 20px;
+  background: #ffffff;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25);
+}
+
+.p-confirm-dialog-message {
+  font-size: 15px;
+  color: #111827;
+}
+
+.p-confirm-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+/* Confirm buttons */
+.p-confirm-dialog-accept {
+  background: #111827;
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 8px 16px;
+}
+
+.p-confirm-dialog-reject {
+  background: #f97316;
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 8px 16px;
+}

@@ -1,0 +1,485 @@
+<script setup lang="ts">
+import { ref, computed, nextTick } from 'vue'
+import { useInboundStore } from '../../stores/inbound'
+
+type Step = 'HOME' | 'NEW_PACKAGE' | 'SCAN' | 'CONFIRM'
+const step = ref<Step>('HOME')
+
+const store = useInboundStore()
+
+// inputs
+const outerBoxInput = ref('')
+const innerBoxInput = ref('')
+const qtyInput = ref<number | null>(null)
+const skuInput = ref('')
+const serialInput = ref('')
+
+// refs for focus
+const outerEl = ref<HTMLInputElement | null>(null)
+const innerEl = ref<HTMLInputElement | null>(null)
+const qtyEl = ref<HTMLInputElement | null>(null)
+const skuEl = ref<HTMLInputElement | null>(null)
+const serialEl = ref<HTMLInputElement | null>(null)
+
+const dateLabel = computed(() => store.session?.date ?? store.date)
+const outerBoxLabel = computed(() => store.session?.outerBoxId ?? '')
+
+function goNewPackage() {
+  step.value = 'NEW_PACKAGE'
+  store.resetCurrentInnerbox()
+  store.clearMessages()
+  outerBoxInput.value = store.session?.outerBoxId ?? ''
+  innerBoxInput.value = ''
+  qtyInput.value = null
+  skuInput.value = ''
+  serialInput.value = ''
+
+  nextTick(() => {
+    outerEl.value?.focus()
+  })
+}
+
+function goHome() {
+  step.value = 'HOME'
+  store.clearMessages()
+  outerBoxInput.value = ''
+  innerBoxInput.value = ''
+  qtyInput.value = null
+  skuInput.value = ''
+  serialInput.value = ''
+}
+
+function resetNewPackageForm() {
+  store.clearMessages()
+  innerBoxInput.value = ''
+  qtyInput.value = null
+  skuInput.value = ''
+  serialInput.value = ''
+  // keep outer box input as-is for convenience
+  nextTick(() => innerEl.value?.focus())
+}
+
+function onNewPackageNext() {
+  store.clearMessages()
+
+  // start or resume session for outerbox
+  store.startOrResumeOuterbox(outerBoxInput.value)
+
+  // begin innerbox
+  store.beginInnerbox(innerBoxInput.value, qtyInput.value ?? 0)
+
+  if (store.error) return
+
+  step.value = 'SCAN'
+  skuInput.value = ''
+  serialInput.value = ''
+  nextTick(() => skuEl.value?.focus())
+}
+
+function onSkuEnter() {
+  const incoming = skuInput.value.trim()
+  if (!incoming) return
+
+  store.setSku(incoming)
+
+  if (store.error) {
+    // Wrong SKU after lock → keep value, refocus SKU
+    nextTick(() => skuEl.value?.focus())
+    return
+  }
+
+  // SKU accepted & locked → move to serial, DO NOT clear
+  nextTick(() => serialEl.value?.focus())
+}
+
+
+
+function onSerialEnter() {
+  store.addSerial(serialInput.value)
+
+  if (store.error) {
+    nextTick(() => serialEl.value?.focus())
+    return
+  }
+
+  // Serial accepted → clear inputs
+  serialInput.value = ''
+  skuInput.value = ''   // ✅ clear SKU ONLY after serial scan
+
+  nextTick(() => skuEl.value?.focus())
+}
+
+
+function resetCurrentInnerbox() {
+  store.resetCurrentInnerbox()
+  skuInput.value = ''
+  serialInput.value = ''
+  // keep outerbox session, go back to NEW_PACKAGE innerbox entry
+  step.value = 'NEW_PACKAGE'
+  innerBoxInput.value = ''
+  qtyInput.value = null
+  nextTick(() => innerEl.value?.focus())
+}
+
+function scanNext() {
+  // only proceed if fully scanned
+  if (!store.canGoConfirm) return
+  step.value = 'CONFIRM'
+  nextTick(() => { })
+}
+
+function confirmReset() {
+  // reset only current innerbox and go back to NEW_PACKAGE
+  resetCurrentInnerbox()
+}
+
+function confirmNextInnerbox() {
+  // finalize current innerbox into session
+  const ok = store.confirmInnerbox()
+  if (!ok) return
+
+  // go to NEW_PACKAGE for next innerbox, keep same outerbox
+  step.value = 'NEW_PACKAGE'
+  store.clearMessages()
+  innerBoxInput.value = ''
+  qtyInput.value = null
+  skuInput.value = ''
+  serialInput.value = ''
+  nextTick(() => innerEl.value?.focus())
+}
+
+function confirmAndGoHome() {
+  store.clearMessages()
+
+  // Try to save current innerbox
+  const ok = store.confirmInnerbox()
+
+  if (!ok) {
+    // If validation fails, stay on page and show error
+    return
+  }
+
+  // After saving, go home
+  step.value = 'HOME'
+}
+
+</script>
+
+<template>
+  <title>Inbound Inventory</title>
+  <div class="bg-white text-gray-900">
+    <!-- Title -->
+    <!-- HOME -->
+    <div v-if="step === 'HOME'" class="h-[calc(100vh-96px)] px-4 flex items-center">
+      <div class="mx-auto w-full max-w-md sm:max-w-3xl text-center">
+
+        <!-- Title near buttons -->
+        <div class="mb-6 sm:mb-10">
+          <div class="font-semibold tracking-wide text-2xl sm:text-2xl md:text-[30px] pb-12">
+            Inbound Inventory Tracking System
+          </div>
+        </div>
+
+        <!-- Buttons -->
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-4 sm:gap-8">
+
+          <!-- NEW PACKAGE -->
+          <button class="w-full sm:w-72 h-24 sm:h-24 rounded-xl border border-gray-300 bg-white
+               shadow-md hover:shadow-xl hover:-translate-y-0.5 transition
+               flex items-center justify-center" @click="goNewPackage">
+            <span class="text-lg sm:text-base font-semibold tracking-wide">
+              NEW PACKAGE
+            </span>
+          </button>
+
+          <!-- DRAFTS -->
+          <button class="w-full sm:w-72 h-24 sm:h-24 rounded-xl border border-gray-300 bg-white
+               shadow-md hover:shadow-xl hover:-translate-y-0.5 transition
+               flex items-center justify-center" @click="() => { /* Drafts later */ }">
+            <span class="text-lg sm:text-base font-semibold tracking-wide">
+              DRAFTS
+            </span>
+          </button>
+
+        </div>
+      </div>
+    </div>
+
+
+
+    <!-- NEW PACKAGE -->
+    <div v-if="step === 'NEW_PACKAGE'" class="px-4">
+      <div class="mx-auto max-w-5xl">
+        <div class="border-t border-gray-300 my-6" />
+
+        <div class="relative py-4">
+          <!-- Date -->
+          <div class="
+      mb-2 text-center text-xs border border-gray-700 p-2
+      md:absolute md:right-0 md:top-0 md:mb-0">
+            Date: {{ dateLabel }}
+          </div>
+
+          <!-- Title -->
+          <div class="text-center font-semibold tracking-wide text-[20px] mt-10">
+            NEW PACKAGE
+          </div>
+        </div>
+
+
+        <div
+          class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-10 items-end justify-items-stretch md:justify-items-center py-6">
+          <div class="w-full md:max-w-xs text-center">
+            <div class="text-xs mb-2">Scan or Type the Outer Box ID</div>
+            <input ref="outerEl" v-model="outerBoxInput"
+              class="w-full border border-gray-700 px-3 py-2 text-center outline-none rounded-md"
+              placeholder="Outer Box ID" @keydown.enter.prevent="innerEl?.focus()" />
+          </div>
+
+          <div class="w-full md:max-w-xs text-center">
+            <div class="text-xs mb-2">Scan or Type the Inner Box ID</div>
+            <input ref="innerEl" v-model="innerBoxInput"
+              class="w-full border border-gray-700 px-3 py-2 text-center outline-none rounded-md"
+              placeholder="Inner Box ID" @keydown.enter.prevent="qtyEl?.focus()" />
+          </div>
+
+          <div class="w-full md:max-w-[140px] text-center">
+            <div class="text-xs mb-2">Quantity</div>
+            <input ref="qtyEl" v-model.number="qtyInput" type="number" min="1"
+              class="w-full border border-gray-700 px-3 py-2 text-center outline-none rounded-md" placeholder="0"
+              @keydown.enter.prevent="onNewPackageNext" />
+          </div>
+        </div>
+
+        <div v-if="store.error" class="mx-auto max-w-2xl border border-red-400 bg-red-50 px-4 py-2 text-sm">
+          {{ store.error }}
+        </div>
+
+        <div class="flex flex-col sm:flex-row justify-center gap-3 sm:gap-6 py-6">
+          <button class="w-full sm:w-28 rounded bg-gray-800 text-white py-2 text-sm hover:opacity-90"
+            @click="onNewPackageNext">
+            Next
+          </button>
+          <button class="w-full sm:w-28 rounded bg-orange-500 text-white py-2 text-sm hover:opacity-90"
+            @click="resetNewPackageForm">
+            Reset
+          </button>
+        </div>
+
+        <div class="border-t border-gray-300 my-6" />
+      </div>
+    </div>
+
+    <!-- SCAN -->
+    <div v-if="step === 'SCAN'" class="px-4">
+      <div class="mx-auto max-w-5xl">
+        <div class="border-t border-gray-300 my-6" />
+
+        <div class="relative py-2 pb-2">
+          <div class="text-sm font-semibold text-gray-500 underline">OuterBox ID: {{ outerBoxLabel }}</div>
+          <div class="absolute right-0 top-0 border border-gray-700 px-3 py-1 text-xs">
+            Date: {{ dateLabel }}
+          </div>
+        </div>
+
+        <div class="text-center w-full">
+          <div class="text-sm font-semibold mt-4">InnerBox ID : {{ store.current.innerBoxId }}</div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-6 py-6">
+          <!-- No of Products -->
+          <div class="bg-white rounded-xl shadow-md p-4 text-center">
+            <div class="text-[11px] text-gray-500 uppercase tracking-wide">
+              No of Products
+            </div>
+            <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">
+              {{ store.current.expectedQty }}
+            </div>
+          </div>
+
+          <!-- Scanned Products -->
+          <div class="bg-white rounded-xl shadow-md p-4 text-center">
+            <div class="text-[11px] text-gray-500 uppercase tracking-wide">
+              Scanned Products
+            </div>
+            <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">
+              {{ store.scannedProductsCurrent }}
+            </div>
+          </div>
+
+          <!-- Scanned Innerboxes -->
+          <div class="bg-white rounded-xl shadow-md p-4 text-center">
+            <div class="text-[11px] text-gray-500 uppercase tracking-wide">
+              Scanned Innerboxes
+            </div>
+            <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">
+              {{ store.scannedInnerboxesCount }}
+            </div>
+          </div>
+
+          <!-- All Products Count -->
+          <div class="bg-white rounded-xl shadow-md p-4 text-center">
+            <div class="text-[11px] text-gray-500 uppercase tracking-wide">
+              Total Products
+            </div>
+            <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">
+              {{ store.allProductsCountIncludingCurrent }}
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-10 items-start justify-items-stretch md:justify-items-center py-2">
+          <div class="w-full md:max-w-xs text-left">
+            <div class="text-xs mb-2">Product SKU</div>
+            <input ref="skuEl" v-model="skuInput"
+              class="w-full border border-gray-700 px-3 py-2 text-center outline-none text-sm rounded-md"
+              placeholder="Scan/Type SKU" @keydown.enter.prevent="onSkuEnter" />
+            <div v-if="store.current.sku" class="mt-1 text-[11px] text-gray-600">
+              Locked SKU: <span class="font-semibold">{{ store.current.sku }}</span>
+            </div>
+          </div>
+
+          <div class="w-full md:max-w-xs text-left">
+            <div class="text-xs mb-2">Product Serial Number</div>
+            <input ref="serialEl" v-model="serialInput"
+              class="w-full border border-gray-700 px-3 py-2 text-center outline-none text-sm rounded-md"
+              placeholder="Scan/Type Serial" @keydown.enter.prevent="onSerialEnter" />
+          </div>
+
+          <div class="w-full md:max-w-xs">
+            <div class="text-xs mb-2 text-left">Scanned Serials</div>
+            <div class="border border-gray-200 p-2 h-28 overflow-auto text-xs rounded-lg">
+              <div v-for="sn in store.current.serials" :key="sn"
+                class="flex items-center justify-between border-b py-1">
+                <span class="font-mono">{{ sn }}</span>
+                <button class="text-[11px] underline" @click="store.removeSerial(sn)">remove</button>
+              </div>
+
+              <div v-if="store.current.serials.length === 0" class="text-gray-400 text-center py-6">
+                No serials yet
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="store.error" class="fixed top-6 left-1/2 -translate-x-1/2 z-50
+         w-[90%] max-w-md px-4 py-3 rounded-lg
+         bg-red-500 text-white text-sm shadow-lg text-center" role="alert">
+          {{ store.error }}
+        </div>
+
+
+        <div class="flex flex-col sm:flex-row justify-center gap-3 sm:gap-6 py-6">
+          <button class="w-full sm:w-28 rounded py-2 text-sm text-white"
+            :class="store.canGoConfirm ? 'bg-gray-800 hover:opacity-90' : 'bg-gray-400 cursor-not-allowed'"
+            :disabled="!store.canGoConfirm" @click="scanNext">
+            Next
+          </button>
+          <button class="w-full sm:w-28 rounded bg-orange-500 text-white py-2 text-sm hover:opacity-90"
+            @click="resetCurrentInnerbox">
+            Reset
+          </button>
+
+        </div>
+
+        <div class="border-t border-gray-300 my-6" />
+      </div>
+    </div>
+
+    <!-- CONFIRM -->
+    <div v-if="step === 'CONFIRM'" class="px-4">
+      <div class="mx-auto max-w-5xl">
+        <div class="border-t border-gray-300 my-6" />
+
+        <div class="relative py-2">
+          <div class="text-sm font-semibold text-gray-500">Outer Box ID: {{ outerBoxLabel }}</div>
+          <div class="absolute right-0 top-0 border border-gray-700 px-3 py-1 text-xs">
+            Date: {{ dateLabel }}
+          </div>
+        </div>
+
+        <div class="text-center text-sm py-2">
+          InnerBox ID : <span class="font-semibold">{{ store.current.innerBoxId }}</span>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 sm:gap-8 py-6">
+
+          <!-- No of Products -->
+          <div class="bg-white rounded-xl shadow-md px-4 py-5 text-center">
+            <div class="text-xs text-gray-500">
+              No of Products
+            </div>
+            <div class="mt-2 text-xl font-semibold text-[#004aad]">
+              {{ store.current.expectedQty }}
+            </div>
+          </div>
+
+          <!-- Scanned Products -->
+          <div class="bg-white rounded-xl shadow-md p-4 text-center">
+            <div class="text-[11px] text-gray-500 uppercase tracking-wide">
+              Scanned Products
+            </div>
+            <div class="mt-2 text-2xl sm:text-xl font-semibold text-[#004aad]">
+              {{ store.scannedProductsCurrent }}
+            </div>
+          </div>
+
+          <!-- Scanned Innerboxes -->
+          <div class="bg-white rounded-xl shadow-md px-4 py-5 text-center">
+            <div class="text-xs text-gray-500">
+              Scanned Innerboxes
+            </div>
+            <div class="mt-2 text-xl font-semibold text-[#004aad]">
+              {{ store.scannedInnerboxesCount }}
+            </div>
+          </div>
+
+          <!-- All Products Count -->
+          <div class="bg-white rounded-xl shadow-md px-4 py-5 text-center">
+            <div class="text-xs text-gray-500">
+              All Products Count
+            </div>
+            <div class="mt-2 text-xl font-semibold text-[#004aad]">
+              {{ store.allProductsCountIncludingCurrent }}
+            </div>
+          </div>
+
+        </div>
+
+
+        <div class="text-center text-sm py-2">
+          Verify & Confirm the products and Innerbox
+        </div>
+
+        <div v-if="store.error" class="mx-auto max-w-3xl border border-red-400 bg-red-50 px-4 py-2 text-sm mt-4">
+          {{ store.error }}
+        </div>
+
+        <div v-if="store.success" class="mx-auto max-w-3xl border border-green-400 bg-green-50 px-4 py-2 text-sm mt-4">
+          {{ store.success }}
+        </div>
+
+        <div class="flex flex-col sm:flex-row justify-center gap-3 sm:gap-6 py-6">
+          <button class="w-full sm:w-28 rounded bg-orange-500 text-white py-2 text-sm hover:opacity-90"
+            @click="confirmReset">
+            Reset
+          </button>
+
+          <button class="w-full sm:w-40 rounded bg-gray-800 text-white py-2 text-sm hover:opacity-90"
+            @click="confirmNextInnerbox">
+            Next InnerBox
+          </button>
+
+          <button class="w-full sm:w-28 rounded border border-gray-700 py-2 text-sm hover:bg-gray-50"
+            @click="confirmAndGoHome">
+            Home
+          </button>
+
+        </div>
+
+        <div class="border-t border-gray-300 my-6" />
+      </div>
+    </div>
+  </div>
+</template>
