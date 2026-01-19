@@ -42,3 +42,7 @@ export async function abandonSession(sessionId: number, packedBy: string) {
 export async function resetSession(sessionId: number, packedBy: string) {
   return api.post(`/inbounds/sessions/${sessionId}/reset`, { packedBy });
 }
+
+export async function validateSku(sessionId: number, sku: string, packedBy: string) {
+  return api.post(`/inbounds/sessions/${sessionId}/validate-sku`, { sku, packedBy });
+}

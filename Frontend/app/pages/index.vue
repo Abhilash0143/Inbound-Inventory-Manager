@@ -3,6 +3,8 @@ import { ref, computed, nextTick, watch } from 'vue'
 import { useInboundStore } from '../../stores/inbound'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
+import { validateSku } from '../../src/api/inbounds'
+
 
 type Step = 'OPERATOR' | 'HOME' | 'NEW_PACKAGE' | 'SCAN' | 'CONFIRM'
 const step = ref<Step>('OPERATOR')
@@ -60,6 +62,32 @@ const innerHint = computed(() =>
 const operatorInput = ref('')
 const operatorEl = ref<HTMLInputElement | null>(null)
 
+function goToOperator() {
+  // hard reset (DB + store)
+  store.resetAll()
+
+  // clear UI inputs
+  outerBoxInput.value = ''
+  innerBoxInput.value = ''
+  qtyInput.value = null
+  skuInput.value = ''
+  serialInput.value = ''
+
+  // reset verification states
+  outerStage.value = 'EMPTY'
+  innerStage.value = 'EMPTY'
+  qtyStage.value = 'EMPTY'
+  outerFirst.value = ''
+  innerFirst.value = ''
+  skuStage.value = 'EMPTY'
+
+  // go to operator screen
+  step.value = 'OPERATOR'
+
+  nextTick(() => operatorEl.value?.focus())
+}
+
+
 function saveOperator() {
   const ok = store.setOperator(operatorInput.value)
   if (!ok) {
@@ -67,6 +95,14 @@ function saveOperator() {
     return
   }
   step.value = 'HOME'
+}
+
+function goEditPackages() {
+  // You can route, or change step, or open a dialog
+  // Example: step-based navigation'
+
+  // Or if using router:
+  // router.push('/inbound/edit')
 }
 
 
@@ -155,48 +191,55 @@ const serialDisabled = computed(() => store.scanLocked || !skuVerified.value)
 // nice small helper text
 const skuPill = computed(() => (skuVerified.value ? store.current.sku : ''))
 
-function onSkuEnter() {
+async function onSkuEnter() {
   const incoming = skuInput.value.trim()
   if (!incoming) return
 
-  // validate SKU via store (keeps compatibility with your existing validation)
-  store.setSku(incoming)
-
-  if (store.error) {
+  // format validation
+  const ok = store.setSku(incoming)
+  if (!ok || store.error) {
+    skuStage.value = 'EMPTY'
+    skuInput.value = ''
     nextTick(() => skuEl.value?.focus())
     return
   }
 
-  // lock SKU only for THIS product scan
-  skuStage.value = 'CONFIRMED'
-  skuInput.value = incoming
+  // ✅ server validation BEFORE serial
+  try {
+    await validateSku(store.sessionId!, store.current.sku, store.operatorName)
+  } catch (err: any) {
+    store.error = err?.response?.data?.error || "SKU mismatch"
+    store.current.sku = ''
+    store.skuValidated = false
+    skuStage.value = 'EMPTY'
+    skuInput.value = ''
+    nextTick(() => skuEl.value?.focus())
+    return
+  }
 
+  skuStage.value = 'CONFIRMED'
+  skuInput.value = store.current.sku
   nextTick(() => serialEl.value?.focus())
 }
 
-function onSerialEnter() {
+
+
+async function onSerialEnter() {
   const incoming = serialInput.value.trim()
   if (!incoming) return
 
-  const ok = store.addSerial(incoming)
+  const ok = await store.addSerial(incoming)
   if (!ok) {
     nextTick(() => serialEl.value?.focus())
     return
   }
 
-  // ✅ After a successful product scan:
-  // - Clear serial
-  // - Force SKU to be scanned again for the next product
   serialInput.value = ''
   skuInput.value = ''
   skuStage.value = 'EMPTY'
-
-    // also clear the store's current SKU so your store validation/disabling works repeatedly
-    // (Pinia state is mutable; this enables re-scan per product)
-    ; (store.current as any).sku = ''
-
   nextTick(() => skuEl.value?.focus())
 }
+
 
 // -----------------------------
 // Toast watchers
@@ -222,9 +265,9 @@ watch(
 // -----------------------------
 // navigation
 // -----------------------------
-function goNewPackage() {
+async function goNewPackage() {
   step.value = 'NEW_PACKAGE'
-  store.resetCurrentInnerbox()
+  await store.resetCurrentInnerbox()   // ✅ await
   store.clearMessages()
 
   outerBoxInput.value = store.session?.outerBoxId ?? ''
@@ -233,7 +276,6 @@ function goNewPackage() {
   skuInput.value = ''
   serialInput.value = ''
 
-  // reset verify state
   outerStage.value = outerBoxInput.value.trim() ? 'CONFIRMED' : 'EMPTY'
   innerStage.value = 'EMPTY'
   qtyStage.value = 'EMPTY'
@@ -241,10 +283,9 @@ function goNewPackage() {
   innerFirst.value = ''
 
   skuStage.value = 'EMPTY'
-    ; (store.current as any).sku = ''
-
   nextTick(() => (outerVerified.value ? innerEl.value?.focus() : outerEl.value?.focus()))
 }
+
 
 function goHome() {
   step.value = 'HOME'
@@ -345,13 +386,12 @@ function requireOuterRescan() {
   nextTick(() => outerEl.value?.focus())
 }
 
-function resetCurrentInnerbox() {
-  store.resetCurrentInnerbox()
-
+async function resetCurrentInnerbox() {
+ const ok = await store.resetCurrentInnerbox()
+if (!ok) return
   skuInput.value = ''
   serialInput.value = ''
   skuStage.value = 'EMPTY'
-    ; (store.current as any).sku = ''
 
   step.value = 'NEW_PACKAGE'
   requireOuterRescan()
@@ -422,8 +462,28 @@ async function confirmAndGoHome() {
   const okLocal = await store.confirmInnerbox()
   if (!okLocal) return
 
-  step.value = 'HOME'
+  // ✅ VERY IMPORTANT: clear session so outerBoxId won't auto-fill again
+  store.resetAll()
+
+  // ✅ Clear UI + verification states
+  outerBoxInput.value = ''
+  innerBoxInput.value = ''
+  qtyInput.value = null
+  skuInput.value = ''
+  serialInput.value = ''
+
+  outerStage.value = 'EMPTY'
+  innerStage.value = 'EMPTY'
+  qtyStage.value = 'EMPTY'
+  outerFirst.value = ''
+  innerFirst.value = ''
+
+  skuStage.value = 'EMPTY'
+  nextTick(() => operatorEl.value?.focus())
+
+  step.value = 'OPERATOR'
 }
+
 
 
 // -----------------------------
@@ -466,22 +526,54 @@ const confirmSummary = computed(() => ({
   <div class="text-gray-900 w-full bg-gray-50 min-h-[calc(100vh-64px)]">
     <!-- HOME -->
     <div v-if="step === 'HOME'" class="h-[calc(100vh-96px)] px-4 flex items-center">
-      <div class="mx-auto w-full max-w-md sm:max-w-3xl text-center">
-        <div class="mb-6 sm:mb-10">
-          <div class="font-semibold tracking-wide text-2xl sm:text-2xl md:text-[30px] pb-12">
-            Inbound Inventory Tracking System
-          </div>
-        </div>
+  <div class="mx-auto w-full max-w-md sm:max-w-4xl text-center">
 
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-4 sm:gap-8">
-          <button
-            class="w-full sm:w-72 h-24 rounded-2xl border border-gray-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition flex items-center justify-center"
-            @click="goNewPackage">
-            <span class="text-lg sm:text-base font-semibold tracking-wide">NEW PACKAGE</span>
-          </button>
-        </div>
+    <!-- Title -->
+    <div class="mb-4 sm:mb-6">
+      <div class="font-semibold tracking-wide text-2xl sm:text-2xl md:text-[30px]">
+        Inbound Inventory Tracking System
+      </div>
+
+      <!-- Operator -->
+      <div class="mt-3 text-sm text-gray-600">
+        Logged in as
+        <span class="font-semibold text-gray-900 ml-1">
+          {{ store.operatorName }}
+        </span>
       </div>
     </div>
+
+    <!-- Actions -->
+    <div
+      class="mt-10 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-4 sm:gap-8"
+    >
+      <!-- New Package -->
+      <button
+        class="w-full sm:w-72 h-24 rounded-2xl border border-gray-200 bg-white shadow-sm
+               hover:shadow-lg hover:-translate-y-0.5 transition
+               flex items-center justify-center"
+        @click="goNewPackage"
+      >
+        <span class="text-lg sm:text-base font-semibold tracking-wide">
+          NEW PACKAGE
+        </span>
+      </button>
+
+      <!-- Edit Packages -->
+      <button
+        class="w-full sm:w-72 h-24 rounded-2xl border border-gray-200 bg-white shadow-sm
+               hover:shadow-lg hover:-translate-y-0.5 transition
+               flex items-center justify-center"
+        @click="goEditPackages"
+      >
+        <span class="text-lg sm:text-base font-semibold tracking-wide">
+          EDIT PACKAGES
+        </span>
+      </button>
+    </div>
+  </div>
+</div>
+
 
     <!-- NEW PACKAGE -->
     <div v-if="step === 'NEW_PACKAGE'" class="px-4 py-6">
@@ -613,10 +705,6 @@ const confirmSummary = computed(() => ({
                   placeholder="Scan/Type SKU" @keydown.enter.prevent="onSkuEnter" />
                 <i v-if="skuVerified"
                   class="pi pi-check-circle absolute right-3 top-1/2 -translate-y-1/2 text-green-600" />
-              </div>
-
-              <div v-if="skuPill" class="mt-2 text-[11px] text-gray-600">
-                Verified SKU: <span class="font-semibold">{{ skuPill }}</span>
               </div>
             </div>
 

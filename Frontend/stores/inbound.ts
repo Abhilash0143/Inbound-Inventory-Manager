@@ -37,8 +37,8 @@ export const useInboundStore = defineStore("inbound", {
 
     // per-item SKU validation state (NOT per innerbox)
     skuValidated: false as boolean,
-    lockedSku: "" as string, // locked for the current scan cycle only
-
+   // locked for the current scan cycle only
+    dbLockedSku: "" as string,
     operatorName: "" as string,
 
     // current (in-progress) innerbox
@@ -176,6 +176,13 @@ export const useInboundStore = defineStore("inbound", {
 
         const { session, items } = r.data;
 
+        // ✅ lock SKU from DB (source of truth)
+        this.dbLockedSku = String(session.lockedSku ?? "").trim().toUpperCase()
+        if (!this.dbLockedSku && Array.isArray(items) && items.length > 0) {
+          this.dbLockedSku = String(items[0].sku ?? "").toUpperCase()
+        }
+
+
         // store server lock id
         this.sessionId = session.id;
 
@@ -187,7 +194,6 @@ export const useInboundStore = defineStore("inbound", {
         this.current.items = Array.isArray(items) ? items : [];
 
         // reset scan-cycle sku state
-        this.lockedSku = "";
         this.current.sku = "";
         this.skuValidated = false;
 
@@ -206,34 +212,21 @@ export const useInboundStore = defineStore("inbound", {
      * ✅ SKU is per-item: must be scanned before each serial
      */
     setSku(incoming: string) {
-  this.clearMessages()
+      this.clearMessages()
 
-  const sku = incoming.trim().toUpperCase()
-  if (!sku) return false
+      const sku = incoming.trim().toUpperCase()
+      if (!sku) return false
 
-  if (!isValidSku(sku)) {
-    this.skuValidated = false
-    this.error = `Invalid SKU: "${sku}"`
-    return false
-  }
+      if (!isValidSku(sku)) {
+        this.skuValidated = false
+        this.error = `Invalid SKU: "${sku}"`
+        return false
+      }
 
-  // ✅ first SKU of innerbox locks it
-  if (!this.lockedSku) {
-    this.lockedSku = sku
-  }
-
-  // ✅ later SKU must match the locked one
-  if (sku !== this.lockedSku) {
-    this.skuValidated = false
-    this.error = `SKU mismatch. Locked SKU is ${this.lockedSku}. You scanned ${sku}`
-    return false
-  }
-
-  this.current.sku = sku
-  this.skuValidated = true
-  this.error = ""
-  return true
-},
+      this.current.sku = sku
+      this.skuValidated = true
+      return true
+    },
 
     /**
      * ✅ Saves each serial immediately to DB.
@@ -255,7 +248,8 @@ export const useInboundStore = defineStore("inbound", {
         return false;
       }
 
-      if (!this.skuValidated || !this.lockedSku || !this.current.sku) {
+      // ✅ No local lockedSku requirement anymore
+      if (!this.skuValidated || !this.current.sku) {
         this.error = "Scan valid SKU first.";
         return false;
       }
@@ -265,7 +259,7 @@ export const useInboundStore = defineStore("inbound", {
         return false;
       }
 
-      // UI duplicate check (server also enforces globally unique serial if you added index)
+      // UI duplicate check (server also enforces globally unique serial)
       if (this.current.items.some((i) => i.serial === sn)) {
         this.error = `Duplicate serial in this InnerBox: ${sn}`;
         return false;
@@ -274,13 +268,13 @@ export const useInboundStore = defineStore("inbound", {
       try {
         await createInboundItem({
           sessionId: this.sessionId,
-          sku: this.lockedSku,
+          sku: this.current.sku,          // ✅ send scanned SKU, server enforces lock
           serialNumber: sn,
           packedBy: this.operatorName,
         });
 
         // only push after server confirms
-        this.current.items.push({ sku: this.lockedSku, serial: sn });
+        this.current.items.push({ sku: this.current.sku, serial: sn }); // ✅ store scanned SKU
 
         // ✅ reset SKU cycle (forces SKU again next product)
         this.current.sku = "";
@@ -288,6 +282,7 @@ export const useInboundStore = defineStore("inbound", {
 
         return true;
       } catch (err: any) {
+        // ✅ Server mismatch error (409) will land here and show in UI
         this.error = err?.response?.data?.error || err?.message || "Failed to save scan";
         return false;
       }
@@ -335,7 +330,7 @@ export const useInboundStore = defineStore("inbound", {
         this.scanCompleted = true;
 
         // stop SKU cycle
-        this.lockedSku = "";
+        this.dbLockedSku = "";
         this.current.sku = "";
         this.skuValidated = false;
 
@@ -381,69 +376,69 @@ export const useInboundStore = defineStore("inbound", {
     },
 
     resetCurrentInnerboxLocal() {
-  this.current = {
-    innerBoxId: "",
-    expectedQty: 0,
-    sku: "",
-    items: [],
-  }
+      this.current = {
+        innerBoxId: "",
+        expectedQty: 0,
+        sku: "",
+        items: [],
+      }
 
-  this.sessionId = null
-  this.lockedSku = ""
-  this.skuValidated = false
-  this.scanLocked = false
-  this.scanCompleted = false
+      this.sessionId = null
+      this.dbLockedSku = ""
+      this.skuValidated = false
+      this.scanLocked = false
+      this.scanCompleted = false
 
-  this.clearMessages()
-},
+      this.clearMessages()
+    },
 
 
     async finalizeInnerbox() {
-  this.clearMessages()
-  if (!this.sessionId) {
-    this.error = "No active session."
-    return false
-  }
+      this.clearMessages()
+      if (!this.sessionId) {
+        this.error = "No active session."
+        return false
+      }
 
-  try {
-    await completeSession(this.sessionId, this.operatorName) // ✅ server confirm + qty check
-    this.scanLocked = true
-    this.scanCompleted = true
-    this.success = "Confirmed successfully."
-    return true
-  } catch (err: any) {
-    this.error = err?.response?.data?.error || err?.message || "Failed to confirm"
-    return false
-  }
-},
+      try {
+        await completeSession(this.sessionId, this.operatorName) // ✅ server confirm + qty check
+        this.scanLocked = true
+        this.scanCompleted = true
+        this.success = "Confirmed successfully."
+        return true
+      } catch (err: any) {
+        this.error = err?.response?.data?.error || err?.message || "Failed to confirm"
+        return false
+      }
+    },
     /**
      * Resets only current innerbox state (keeps outerbox session + history)
      */
     async resetCurrentInnerbox() {
-  this.clearMessages();
+      this.clearMessages();
 
-  // ✅ if session exists, rollback server data too
-  if (this.sessionId) {
-    try {
-      await resetSession(this.sessionId, this.operatorName);
-    } catch (err: any) {
-      this.error = err?.response?.data?.error || err?.message || "Failed to reset on server";
-      return false
-      // even if server failed, still allow UI reset if you want
-    }
-  }
+      // ✅ if session exists, rollback server data too
+      if (this.sessionId) {
+        try {
+          await resetSession(this.sessionId, this.operatorName);
+        } catch (err: any) {
+          this.error = err?.response?.data?.error || err?.message || "Failed to reset on server";
+          return false
+          // even if server failed, still allow UI reset if you want
+        }
+      }
 
-  // local reset
-  this.current = { innerBoxId: "", expectedQty: 0, sku: "", items: [] };
-  this.sessionId = null;
-  this.lockedSku = "";
-  this.skuValidated = false;
-  this.scanLocked = false;
-  this.scanCompleted = false;
-  this.clearMessages();
+      // local reset
+      this.current = { innerBoxId: "", expectedQty: 0, sku: "", items: [] };
+      this.sessionId = null;
+      this.dbLockedSku = ""
+      this.skuValidated = false;
+      this.scanLocked = false;
+      this.scanCompleted = false;
+      this.clearMessages();
 
-  return true;
-},
+      return true;
+    },
 
     /**
      * Resets everything
