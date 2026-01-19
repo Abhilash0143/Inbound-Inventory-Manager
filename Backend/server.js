@@ -126,6 +126,7 @@ app.post("/api/inbounds/sessions/claim", async (req, res) => {
           expected_qty AS "expectedQty",
           status,
           locked_by AS "lockedBy",
+          locked_sku AS "lockedSku",
           locked_at AS "lockedAt",
           last_seen AS "lastSeen"
         `,
@@ -174,6 +175,7 @@ app.post("/api/inbounds/sessions/claim", async (req, res) => {
         status,
         locked_by AS "lockedBy",
         locked_at AS "lockedAt",
+        locked_sku AS "lockedSku", 
         last_seen AS "lastSeen"
       `,
       [s.id, packedBy, expectedQty]
@@ -248,8 +250,27 @@ app.post("/api/inbounds/items", async (req, res) => {
     if (!s.rows.length) return res.status(404).json({ error: "Session not found." });
 
     const session = s.rows[0];
+    
     if (session.status !== "IN_PROGRESS") return res.status(409).json({ error: "Session is not IN_PROGRESS." });
     if (toText(session.locked_by) !== packedBy) return res.status(403).json({ error: "InnerBox is locked by another user." });
+    // ✅ DB-enforced SKU lock
+const incomingSku = sku; // already uppercased
+
+if (!session.locked_sku) {
+  // first item locks the SKU in DB
+  await pool.query(
+    `UPDATE inbound_sessions SET locked_sku = $2 WHERE id = $1`,
+    [sessionId, incomingSku]
+  );
+} else {
+  // subsequent items must match the locked SKU
+  if (toUpperText(session.locked_sku) !== incomingSku) {
+    return res.status(409).json({
+      error: `SKU mismatch. Locked SKU is ${session.locked_sku}. You scanned ${incomingSku}`,
+    });
+  }
+}
+
 
     // Insert item
     const q = `
@@ -445,6 +466,36 @@ app.get("/api/inbounds", async (req, res) => {
   res.json(result.rows);
 });
 
+// Validate SKU for current session (no serial needed)
+app.post("/api/inbounds/sessions/:id/validate-sku", async (req, res) => {
+  const id = toInt(req.params.id, 0);
+  const packedBy = toText(req.body?.packedBy);
+  const sku = toUpperText(req.body?.sku);
+
+  if (!id) return res.status(400).json({ error: "Invalid session id." });
+  if (!packedBy) return res.status(400).json({ error: "packedBy required." });
+  if (!sku) return res.status(400).json({ error: "sku required." });
+
+  const s = await pool.query(`SELECT * FROM inbound_sessions WHERE id = $1`, [id]);
+  if (!s.rows.length) return res.status(404).json({ error: "Session not found." });
+
+  const session = s.rows[0];
+  if (session.status !== "IN_PROGRESS") return res.status(409).json({ error: "Session is not IN_PROGRESS." });
+  if (toText(session.locked_by) !== packedBy) return res.status(403).json({ error: "Locked by another user." });
+
+  // If lock exists, enforce it
+  if (session.locked_sku && toUpperText(session.locked_sku) !== sku) {
+    return res.status(409).json({
+      error: `SKU mismatch. Locked SKU is ${session.locked_sku}. You scanned ${sku}`,
+      lockedSku: toUpperText(session.locked_sku),
+    });
+  }
+
+  // If no lock yet, allow SKU (do NOT lock here; keep lock on first item insert)
+  return res.json({ ok: true, lockedSku: toUpperText(session.locked_sku || "") });
+});
+
+
 // DELETE by serial (optional)
 app.delete("/api/inbounds/:serialNumber", async (req, res) => {
   const serialNumber = toUpperText(req.params.serialNumber);
@@ -498,11 +549,14 @@ app.post("/api/inbounds/sessions/:id/reset", async (req, res) => {
 
     // ✅ abandon the session (so it won’t resume)
     await client.query(
-      `UPDATE inbound_sessions
-       SET status = 'ABANDONED', last_seen = now()
-       WHERE id = $1`,
-      [id]
-    );
+  `UPDATE inbound_sessions
+   SET status = 'ABANDONED',
+       last_seen = now(),
+       locked_sku = NULL
+   WHERE id = $1`,
+  [id]
+);
+
 
     await client.query("COMMIT");
     res.json({ ok: true, deletedItems: del.rowCount });
