@@ -32,6 +32,22 @@ function toInt(v, fallback = 0) {
   return Math.floor(n);
 }
 
+// -----------------------------
+// Admin auth (simple password)
+// -----------------------------
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "").trim();
+
+function requireAdmin(req, res, next) {
+  const pw = String(req.headers["x-admin-password"] || "").trim();
+  if (!ADMIN_PASSWORD) {
+    return res.status(500).json({ error: "ADMIN_PASSWORD is not set on server." });
+  }
+  if (pw !== ADMIN_PASSWORD) {
+    return res.status(401).json({ error: "Invalid admin password." });
+  }
+  next();
+}
+
 // ----------------------------------------------------
 // Startup check
 // ----------------------------------------------------
@@ -78,6 +94,11 @@ app.get("/health", async (req, res) => {
 //   ON inbound_items (session_id);
 // ====================================================
 
+// ----------------------------------------------------
+// 1) CLAIM / RESUME a session (prevents 2 users scanning same innerbox)
+// POST /api/inbounds/sessions/claim
+// body: { outerBoxId, innerBoxId, expectedQty, packedBy }
+// ----------------------------------------------------
 // ----------------------------------------------------
 // 1) CLAIM / RESUME a session (prevents 2 users scanning same innerbox)
 // POST /api/inbounds/sessions/claim
@@ -157,13 +178,26 @@ app.post("/api/inbounds/sessions/claim", async (req, res) => {
       });
     }
 
-    // Resume (same operator) OR takeover (lease expired)
+    // ✅ Determine if qty is allowed to change (only if NOTHING scanned yet)
+    const countR = await client.query(
+      `SELECT COUNT(*)::int AS c FROM inbound_items WHERE session_id = $1`,
+      [s.id]
+    );
+    const scannedCount = countR.rows[0].c;
+    const canChangeQty = scannedCount === 0;
+
+    // ✅ Resume (same operator) OR takeover (lease expired)
+    // ✅ expected_qty updates ONLY when canChangeQty === true
     const updated = await client.query(
       `
       UPDATE inbound_sessions
       SET
         locked_by = $2,
-        expected_qty = CASE WHEN $3 > 0 THEN $3 ELSE expected_qty END,
+        expected_qty =
+          CASE
+            WHEN $3 > 0 AND $4 = TRUE THEN $3
+            ELSE expected_qty
+          END,
         status = 'IN_PROGRESS',
         last_seen = now()
       WHERE id = $1
@@ -175,10 +209,10 @@ app.post("/api/inbounds/sessions/claim", async (req, res) => {
         status,
         locked_by AS "lockedBy",
         locked_at AS "lockedAt",
-        locked_sku AS "lockedSku", 
+        locked_sku AS "lockedSku",
         last_seen AS "lastSeen"
       `,
-      [s.id, packedBy, expectedQty]
+      [s.id, packedBy, expectedQty, canChangeQty]
     );
 
     const items = await client.query(
@@ -202,6 +236,7 @@ app.post("/api/inbounds/sessions/claim", async (req, res) => {
     client.release();
   }
 });
+
 
 // ----------------------------------------------------
 // 2) HEARTBEAT (keeps lock alive while scanning)
@@ -505,6 +540,224 @@ app.delete("/api/inbounds/:serialNumber", async (req, res) => {
   );
   res.json({ deleted: result.rowCount });
 });
+// ----------------------------------------------------
+// ADMIN: List all packages (sessions) with summary
+// GET /api/admin/inbounds/sessions
+// ----------------------------------------------------
+app.get("/api/admin/inbounds/sessions", requireAdmin, async (req, res) => {
+  const { limit = 200 } = req.query;
+
+  const q = `
+    SELECT
+      s.id,
+      s.outerbox_id AS "outerBoxId",
+      s.innerbox_id AS "innerBoxId",
+      s.expected_qty AS "expectedQty",
+      s.status,
+      s.locked_sku AS "lockedSku",
+      s.confirmed_at AS "confirmedAt",
+      s.locked_at AS "lockedAt",
+      (SELECT COUNT(*)::int FROM inbound_items i WHERE i.session_id = s.id) AS "scannedQty"
+    FROM inbound_sessions s
+    ORDER BY COALESCE(s.confirmed_at, s.locked_at) DESC
+    LIMIT $1
+  `;
+
+  const r = await pool.query(q, [Math.min(Number(limit) || 200, 500)]);
+  res.json(r.rows);
+});
+
+// ----------------------------------------------------
+// ADMIN: Update an inbound item (SKU / Serial) with same validations
+// PATCH /api/admin/inbounds/items/:id
+// body: { sku?, serialNumber? }
+// ----------------------------------------------------
+app.patch("/api/admin/inbounds/items/:id", requireAdmin, async (req, res) => {
+  const itemId = Number(req.params.id);
+  if (!itemId) return res.status(400).json({ error: "Invalid item id" });
+
+  const newSkuRaw = req.body?.sku;
+  const newSerialRaw = req.body?.serialNumber;
+
+  const newSku = newSkuRaw !== undefined ? toUpperText(newSkuRaw) : undefined;
+  const newSerial = newSerialRaw !== undefined ? toUpperText(newSerialRaw) : undefined;
+
+  if (newSku === "" || newSerial === "") {
+    return res.status(400).json({ error: "sku/serialNumber cannot be empty" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // 1) Load item + lock it
+    const it = await client.query(
+      `SELECT * FROM inbound_items WHERE id = $1 FOR UPDATE`,
+      [itemId]
+    );
+    if (!it.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Item not found" });
+    }
+
+    const item = it.rows[0];
+    const sessionId = Number(item.session_id);
+
+    // 2) Lock session row (for locked_sku enforcement)
+    const s = await client.query(
+      `SELECT * FROM inbound_sessions WHERE id = $1 FOR UPDATE`,
+      [sessionId]
+    );
+    if (!s.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Session not found" });
+    }
+
+    const session = s.rows[0];
+
+    const finalSku = newSku !== undefined ? newSku : toUpperText(item.sku);
+    const finalSerial = newSerial !== undefined ? newSerial : toUpperText(item.serial_number);
+
+    // 3) Same validations as scanning
+    if (!finalSku || !finalSerial) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "sku and serialNumber are required" });
+    }
+
+    if (finalSerial === finalSku) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "Serial number cannot be the same as SKU." });
+    }
+
+    // 4) Enforce DB locked SKU exactly like createInboundItem
+    if (!session.locked_sku) {
+      // if lock not set, set it to the edited SKU (first SKU becomes lock)
+      await client.query(`UPDATE inbound_sessions SET locked_sku = $2 WHERE id = $1`, [
+        sessionId,
+        finalSku,
+      ]);
+    } else {
+      // if lock exists, SKU must match
+      if (toUpperText(session.locked_sku) !== finalSku) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          error: `SKU mismatch. Locked SKU is ${session.locked_sku}. You tried ${finalSku}. Clear Locked SKU first.`,
+        });
+      }
+    }
+
+    // 5) Update the item (serial uniqueness is enforced by your unique index)
+    const updated = await client.query(
+      `
+      UPDATE inbound_items
+      SET sku = $2, serial_number = $3
+      WHERE id = $1
+      RETURNING
+        id,
+        session_id AS "sessionId",
+        sku,
+        serial_number AS "serialNumber",
+        packed_by AS "packedBy",
+        created_at AS "createdAt"
+      `,
+      [itemId, finalSku, finalSerial]
+    );
+
+    await client.query("COMMIT");
+    res.json({ ok: true, item: updated.rows[0] });
+  } catch (e) {
+    await client.query("ROLLBACK");
+
+    // duplicate serial
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Serial number already exists." });
+    }
+
+    res.status(500).json({ error: "Server error", details: e.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ----------------------------------------------------
+// ADMIN: Update a session (expectedQty / clearLockedSku)
+// PATCH /api/admin/inbounds/sessions/:id
+// body: { expectedQty?, clearLockedSku? }
+// ----------------------------------------------------
+app.patch("/api/admin/inbounds/sessions/:id", requireAdmin, async (req, res) => {
+  const id = toInt(req.params.id, 0);
+  if (!id) return res.status(400).json({ error: "Invalid session id" });
+
+  const expectedQty = req.body?.expectedQty;
+  const clearLockedSku = !!req.body?.clearLockedSku;
+
+  const sets = [];
+  const values = [];
+  let i = 1;
+
+  if (expectedQty !== undefined) {
+    sets.push(`expected_qty = $${i++}`);
+    values.push(Math.max(0, toInt(expectedQty, 0)));
+  }
+
+  if (clearLockedSku) {
+    sets.push(`locked_sku = NULL`);
+  }
+
+  if (!sets.length) {
+    return res.status(400).json({ error: "No changes provided" });
+  }
+
+  values.push(id);
+
+  const q = `
+    UPDATE inbound_sessions
+    SET ${sets.join(", ")}
+    WHERE id = $${i}
+    RETURNING
+      id,
+      outerbox_id AS "outerBoxId",
+      innerbox_id AS "innerBoxId",
+      expected_qty AS "expectedQty",
+      status,
+      locked_sku AS "lockedSku",
+      confirmed_at AS "confirmedAt",
+      locked_at AS "lockedAt";
+  `;
+
+  const r = await pool.query(q, values);
+  if (!r.rows.length) return res.status(404).json({ error: "Session not found" });
+
+  res.json({ ok: true, session: r.rows[0] });
+});
+
+// ----------------------------------------------------
+// ADMIN: Delete a whole session (and its items)
+// DELETE /api/admin/inbounds/sessions/:id
+// ----------------------------------------------------
+app.delete("/api/admin/inbounds/sessions/:id", requireAdmin, async (req, res) => {
+  const id = toInt(req.params.id, 0);
+  if (!id) return res.status(400).json({ error: "Invalid session id" });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // delete items first
+    await client.query(`DELETE FROM inbound_items WHERE session_id = $1`, [id]);
+
+    // delete session
+    const del = await client.query(`DELETE FROM inbound_sessions WHERE id = $1`, [id]);
+
+    await client.query("COMMIT");
+    return res.json({ ok: true, deleted: del.rowCount });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    return res.status(500).json({ error: "Server error", details: e.message });
+  } finally {
+    client.release();
+  }
+});
 
 // ----------------------------------------------------
 const port = process.env.PORT || 4000;
@@ -566,4 +819,62 @@ app.post("/api/inbounds/sessions/:id/reset", async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// ----------------------------------------------------
+// ADMIN: Get one package (session + items)
+// GET /api/admin/inbounds/sessions/:id
+// ----------------------------------------------------
+app.get("/api/admin/inbounds/sessions/:id", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid session id" });
+
+  const s = await pool.query(
+    `
+    SELECT
+      id,
+      outerbox_id AS "outerBoxId",
+      innerbox_id AS "innerBoxId",
+      expected_qty AS "expectedQty",
+      status,
+      locked_sku AS "lockedSku",
+      confirmed_at AS "confirmedAt",
+      locked_at AS "lockedAt"
+    FROM inbound_sessions
+    WHERE id = $1
+    `,
+    [id]
+  );
+
+  if (!s.rows.length) return res.status(404).json({ error: "Session not found" });
+
+  const items = await pool.query(
+    `
+    SELECT
+      id,
+      sku,
+      serial_number AS "serialNumber",
+      packed_by AS "packedBy",
+      created_at AS "createdAt"
+    FROM inbound_items
+    WHERE session_id = $1
+    ORDER BY id ASC
+    `,
+    [id]
+  );
+
+  res.json({ session: s.rows[0], items: items.rows });
+});
+
+
+// ----------------------------------------------------
+// ADMIN: Delete an item by id (remove wrong scan)
+// DELETE /api/admin/inbounds/items/:id
+// ----------------------------------------------------
+app.delete("/api/admin/inbounds/items/:id", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid item id" });
+
+  const r = await pool.query(`DELETE FROM inbound_items WHERE id = $1`, [id]);
+  res.json({ ok: true, deleted: r.rowCount });
 });
