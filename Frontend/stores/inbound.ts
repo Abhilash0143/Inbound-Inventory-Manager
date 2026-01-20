@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { isValidSku } from "../utils/skuValidator";
 import { claimSession, createInboundItem, completeSession, heartbeat as apiHeartbeat } from "../src/api/inbounds";
 import { resetSession } from "../src/api/inbounds";
+import { deleteBatchItems } from "../src/api/inbounds";
 
 export type ScannedItem = {
   sku: string;
@@ -59,11 +60,9 @@ export const useInboundStore = defineStore("inbound", {
     batchLocked: false as boolean,    // when true, scanning must pause and require confirm
 
     qtyLocked: false as boolean,
-
+    goHomeRequested: false as boolean,
 
   }),
-
-
 
   getters: {
     date: () => todayISO(),
@@ -178,6 +177,14 @@ export const useInboundStore = defineStore("inbound", {
       this.goOperatorRequested = false
     },
 
+    requestGoHome() {
+  this.goHomeRequested = true;
+},
+clearGoHomeRequest() {
+  this.goHomeRequested = false;
+},
+
+
 
     startOrResumeOuterbox(outerBoxId: string) {
       const id = outerBoxId.trim();
@@ -201,6 +208,7 @@ export const useInboundStore = defineStore("inbound", {
       this.resetCurrentInnerbox();
       this.clearMessages();
       return true;
+      
     },
 
     /**
@@ -403,10 +411,14 @@ async resetBatch() {
   }
 
   try {
-    // ✅ Backend must delete these rows in PostgreSQL
-    // await deleteInboundItems(this.sessionId, this.operatorName, pendingItems.map(i => i.serial));
+    // ✅ delete from DB first
+    await deleteBatchItems({
+      sessionId: this.sessionId,
+      packedBy: this.operatorName,
+      serialNumbers: pendingItems.map((i) => i.serial),
+    });
 
-    // ✅ Local remove
+    // ✅ then delete locally
     this.current.items.splice(this.confirmedCount);
     this.batchLocked = false;
 

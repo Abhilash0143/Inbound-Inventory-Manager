@@ -10,23 +10,14 @@
     </div>
 
     <!-- RIGHT: Home button -->
-    <button
-      type="button"
-      class="mr-5 px-4 py-2 rounded-lg bg-gray-500 text-white text-sm hover:opacity-90 pi pi-home"
-      @click="store.requestGoOperator()"
-    >
-      Home
-    </button>
   </header>
 </template>
 
 
 <script lang="ts" setup>
-import { useRouter } from 'vue-router'
 import { useInboundStore } from '../../stores/inbound'
 const store = useInboundStore()
 
-const router = useRouter()
 
 defineEmits<{
   (e: 'go-operator'): void

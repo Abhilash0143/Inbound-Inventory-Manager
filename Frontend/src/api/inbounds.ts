@@ -91,3 +91,20 @@ export function adminDeleteSession(adminPw: string, sessionId: number) {
     headers: { "x-admin-password": adminPw },
   });
 }
+
+export function deleteSessionByBox(payload: {
+  outerBoxId: string;
+  innerBoxId: string;
+  packedBy: string;
+}) {
+  // ✅ correct: uses backend baseURL (http://192.168.50.6:4000/api)
+  return api.post("/inbounds/sessions/delete-by-box", payload);
+}
+
+export function deleteBatchItems(payload: {
+  sessionId: number;
+  packedBy: string;
+  serialNumbers: string[];
+}) {
+  return api.post("/inbounds/items/delete-batch", payload);
+}
