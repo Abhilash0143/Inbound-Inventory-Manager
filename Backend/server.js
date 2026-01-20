@@ -99,11 +99,70 @@ app.get("/health", async (req, res) => {
 // POST /api/inbounds/sessions/claim
 // body: { outerBoxId, innerBoxId, expectedQty, packedBy }
 // ----------------------------------------------------
+
 // ----------------------------------------------------
-// 1) CLAIM / RESUME a session (prevents 2 users scanning same innerbox)
-// POST /api/inbounds/sessions/claim
-// body: { outerBoxId, innerBoxId, expectedQty, packedBy }
+// DELETE pending batch items by serial list (DB delete)
+// POST /api/inbounds/items/delete-batch
+// body: { sessionId, packedBy, serialNumbers: string[] }
 // ----------------------------------------------------
+app.post("/api/inbounds/items/delete-batch", async (req, res) => {
+  const sessionId = Number(req.body?.sessionId);
+  const packedBy = String(req.body?.packedBy || "").trim();
+  const serialNumbers = Array.isArray(req.body?.serialNumbers) ? req.body.serialNumbers : [];
+
+  if (!sessionId) return res.status(400).json({ error: "sessionId is required." });
+  if (!packedBy) return res.status(400).json({ error: "packedBy is required." });
+  if (!serialNumbers.length) return res.status(400).json({ error: "serialNumbers is required." });
+
+  // normalize serials
+  const serials = serialNumbers.map((s) => String(s || "").trim().toUpperCase()).filter(Boolean);
+  if (!serials.length) return res.status(400).json({ error: "No valid serialNumbers provided." });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // lock session row
+    const s = await client.query(
+      `SELECT * FROM inbound_sessions WHERE id = $1 FOR UPDATE`,
+      [sessionId]
+    );
+    if (!s.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Session not found." });
+    }
+
+    const session = s.rows[0];
+
+    // allow delete even if CONFIRMED or IN_PROGRESS, but require operator match OR admin logic
+    // (per your requirement: operator should be able to delete scanned box if present)
+    // Here: allow the same operator who scanned (locked_by) to delete.
+    // If you want "any operator can delete", remove this check.
+    if (String(session.locked_by || "").trim() !== packedBy) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ error: "Not allowed. Locked by another user." });
+    }
+
+    // delete only items for this session + provided serials
+    const del = await client.query(
+      `
+      DELETE FROM inbound_items
+      WHERE session_id = $1
+        AND serial_number = ANY($2::text[])
+      `,
+      [sessionId, serials]
+    );
+
+    await client.query("COMMIT");
+    return res.json({ ok: true, deletedItems: del.rowCount });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    return res.status(500).json({ error: "Server error", details: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 app.post("/api/inbounds/sessions/claim", async (req, res) => {
   const outer = toText(req.body?.outerBoxId);
   const inner = toText(req.body?.innerBoxId);
@@ -178,26 +237,13 @@ app.post("/api/inbounds/sessions/claim", async (req, res) => {
       });
     }
 
-    // ✅ Determine if qty is allowed to change (only if NOTHING scanned yet)
-    const countR = await client.query(
-      `SELECT COUNT(*)::int AS c FROM inbound_items WHERE session_id = $1`,
-      [s.id]
-    );
-    const scannedCount = countR.rows[0].c;
-    const canChangeQty = scannedCount === 0;
-
-    // ✅ Resume (same operator) OR takeover (lease expired)
-    // ✅ expected_qty updates ONLY when canChangeQty === true
+    // Resume (same operator) OR takeover (lease expired)
     const updated = await client.query(
       `
       UPDATE inbound_sessions
       SET
         locked_by = $2,
-        expected_qty =
-          CASE
-            WHEN $3 > 0 AND $4 = TRUE THEN $3
-            ELSE expected_qty
-          END,
+        expected_qty = CASE WHEN $3 > 0 THEN $3 ELSE expected_qty END,
         status = 'IN_PROGRESS',
         last_seen = now()
       WHERE id = $1
@@ -209,10 +255,10 @@ app.post("/api/inbounds/sessions/claim", async (req, res) => {
         status,
         locked_by AS "lockedBy",
         locked_at AS "lockedAt",
-        locked_sku AS "lockedSku",
+        locked_sku AS "lockedSku", 
         last_seen AS "lastSeen"
       `,
-      [s.id, packedBy, expectedQty, canChangeQty]
+      [s.id, packedBy, expectedQty]
     );
 
     const items = await client.query(
@@ -236,7 +282,6 @@ app.post("/api/inbounds/sessions/claim", async (req, res) => {
     client.release();
   }
 });
-
 
 // ----------------------------------------------------
 // 2) HEARTBEAT (keeps lock alive while scanning)
@@ -758,6 +803,86 @@ app.delete("/api/admin/inbounds/sessions/:id", requireAdmin, async (req, res) =>
     client.release();
   }
 });
+
+// ✅ DELETE a session (and its items) by Outer+Inner, regardless of status
+// POST /api/inbounds/sessions/delete-by-box
+// body: { outerBoxId, innerBoxId, packedBy }
+app.post("/api/inbounds/sessions/delete-by-box", async (req, res) => {
+  const outer = toText(req.body?.outerBoxId);
+  const inner = toText(req.body?.innerBoxId);
+  const packedBy = toText(req.body?.packedBy);
+
+  if (!outer || !inner) {
+    return res.status(400).json({ error: "outerBoxId and innerBoxId are required." });
+  }
+  if (!packedBy) {
+    return res.status(400).json({ error: "packedBy (operator username) is required." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // lock session row
+    const s = await client.query(
+      `
+      SELECT *
+      FROM inbound_sessions
+      WHERE outerbox_id = $1 AND innerbox_id = $2
+      FOR UPDATE
+      `,
+      [outer, inner]
+    );
+
+    if (!s.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Session not found in database." });
+    }
+
+    const session = s.rows[0];
+
+    // lease expiry logic (same as claim)
+    const lastSeenMs = new Date(session.last_seen).getTime();
+    const leaseExpired = Date.now() - lastSeenMs > LEASE_MS;
+
+    // allow delete if same locker OR lease expired
+    if (toText(session.locked_by) !== packedBy && !leaseExpired) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: `InnerBox is in progress by "${session.locked_by}". Cannot delete until lease expires.`,
+        lockedBy: session.locked_by,
+      });
+    }
+
+    // delete items
+    const delItems = await client.query(
+      `DELETE FROM inbound_items WHERE session_id = $1`,
+      [session.id]
+    );
+
+    // delete session
+    const delSession = await client.query(
+      `DELETE FROM inbound_sessions WHERE id = $1`,
+      [session.id]
+    );
+
+    await client.query("COMMIT");
+
+    return res.json({
+      ok: true,
+      sessionId: session.id,
+      status: session.status,
+      deletedItems: delItems.rowCount,
+      deletedSession: delSession.rowCount,
+    });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    return res.status(500).json({ error: "Server error", details: e.message });
+  } finally {
+    client.release();
+  }
+});
+
 
 // ----------------------------------------------------
 const port = process.env.PORT || 4000;
