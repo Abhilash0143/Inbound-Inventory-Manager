@@ -1,9 +1,10 @@
 import axios from "axios";
 
 export const api = axios.create({
-  baseURL: "http://localhost:4000/api",
+  baseURL: "http://192.168.50.6:4000/api", // <-- your laptop IP
   headers: { "Content-Type": "application/json" },
 });
+
 
 export type ClaimSessionPayload = {
   outerBoxId: string;
@@ -45,4 +46,48 @@ export async function resetSession(sessionId: number, packedBy: string) {
 
 export async function validateSku(sessionId: number, sku: string, packedBy: string) {
   return api.post(`/inbounds/sessions/${sessionId}/validate-sku`, { sku, packedBy });
+}
+
+export async function adminListSessions(adminPassword: string) {
+  return api.get("/admin/inbounds/sessions", {
+    headers: { "x-admin-password": adminPassword }
+  });
+}
+
+export async function adminGetSession(adminPassword: string, sessionId: number) {
+  return api.get(`/admin/inbounds/sessions/${sessionId}`, {
+    headers: { "x-admin-password": adminPassword }
+  });
+}
+
+export async function adminUpdateSession(
+  adminPassword: string,
+  sessionId: number,
+  payload: { expectedQty?: number; clearLockedSku?: boolean }
+) {
+  return api.patch(`/admin/inbounds/sessions/${sessionId}`, payload, {
+    headers: { "x-admin-password": adminPassword }
+  });
+}
+
+export async function adminDeleteItem(adminPassword: string, itemId: number) {
+  return api.delete(`/admin/inbounds/items/${itemId}`, {
+    headers: { "x-admin-password": adminPassword }
+  });
+}
+
+export async function adminUpdateItem(
+  adminPassword: string,
+  itemId: number,
+  payload: { sku?: string; serialNumber?: string }
+) {
+  return api.patch(`/admin/inbounds/items/${itemId}`, payload, {
+    headers: { "x-admin-password": adminPassword }
+  });
+}
+
+export function adminDeleteSession(adminPw: string, sessionId: number) {
+  return api.delete(`/admin/inbounds/sessions/${sessionId}`, {
+    headers: { "x-admin-password": adminPw },
+  });
 }

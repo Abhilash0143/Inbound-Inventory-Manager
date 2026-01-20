@@ -25,6 +25,7 @@ export type Session = {
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export const useInboundStore = defineStore("inbound", {
+
   state: () => ({
     session: null as Session | null,
 
@@ -37,7 +38,7 @@ export const useInboundStore = defineStore("inbound", {
 
     // per-item SKU validation state (NOT per innerbox)
     skuValidated: false as boolean,
-   // locked for the current scan cycle only
+    // locked for the current scan cycle only
     dbLockedSku: "" as string,
     operatorName: "" as string,
 
@@ -51,7 +52,18 @@ export const useInboundStore = defineStore("inbound", {
 
     error: "" as string,
     success: "" as string,
+    goOperatorRequested: false as boolean,
+
+    batchSize: 5 as number,
+    confirmedCount: 0 as number,      // how many items are confirmed (in confirmed batches)
+    batchLocked: false as boolean,    // when true, scanning must pause and require confirm
+
+    qtyLocked: false as boolean,
+
+
   }),
+
+
 
   getters: {
     date: () => todayISO(),
@@ -90,7 +102,51 @@ export const useInboundStore = defineStore("inbound", {
       s.current.expectedQty > 0 &&
       s.skuValidated &&
       !!s.current.sku &&
-      !s.scanLocked,
+      !s.scanLocked &&
+      !s.batchLocked,
+
+    pendingCount: (s) => Math.max(0, s.current.items.length - s.confirmedCount),
+
+    pendingItems: (s) => s.current.items.slice(s.confirmedCount),
+
+    isBatchFull: (s) => (s.current.items.length - s.confirmedCount) >= s.batchSize,
+
+    
+  totalBatches(): number {
+    const q = this.current.expectedQty || 0;
+    return q > 0 ? Math.ceil(q / this.batchSize) : 0;
+  },
+
+  currentBatchIndex(): number {
+    const confirmed = this.confirmedCount || 0;
+    return this.batchSize > 0 ? Math.floor(confirmed / this.batchSize) + 1 : 1;
+  },
+
+  isLastBatch(): boolean {
+    return this.totalBatches > 0 && this.currentBatchIndex === this.totalBatches;
+  },
+
+  canShowScanComplete(): boolean {
+    return this.isLastBatch;
+  },
+
+  canEnableScanComplete(): boolean {
+    const expected = this.current.expectedQty || 0;
+    const scanned = this.current.items.length;
+    const pending = Math.max(0, scanned - (this.confirmedCount || 0));
+
+    return expected > 0 &&
+      scanned === expected &&
+      pending === 0 &&
+      this.isLastBatch &&
+      !this.scanLocked;
+  },
+
+  canConfirmBatch: (s) => {
+  const pending = Math.max(0, s.current.items.length - s.confirmedCount);
+  return pending > 0 && pending <= s.batchSize;
+},
+
   },
 
   actions: {
@@ -113,6 +169,15 @@ export const useInboundStore = defineStore("inbound", {
     clearOperator() {
       this.operatorName = "";
     },
+
+    requestGoOperator() {
+      this.goOperatorRequested = true
+    },
+
+    clearGoOperatorRequest() {
+      this.goOperatorRequested = false
+    },
+
 
     startOrResumeOuterbox(outerBoxId: string) {
       const id = outerBoxId.trim();
@@ -189,9 +254,14 @@ export const useInboundStore = defineStore("inbound", {
         // normalize fields (server returns camelCase)
         this.current.innerBoxId = session.innerBoxId ?? inner;
         this.current.expectedQty = session.expectedQty ?? qty;
+        this.qtyLocked = true;
 
         // load already scanned items (resume)
         this.current.items = Array.isArray(items) ? items : [];
+
+        this.confirmedCount = this.current.items.length;
+this.batchLocked = false;
+
 
         // reset scan-cycle sku state
         this.current.sku = "";
@@ -276,10 +346,16 @@ export const useInboundStore = defineStore("inbound", {
         // only push after server confirms
         this.current.items.push({ sku: this.current.sku, serial: sn }); // ✅ store scanned SKU
 
+        
+
         // ✅ reset SKU cycle (forces SKU again next product)
         this.current.sku = "";
         this.skuValidated = false;
 
+        const pending = this.current.items.length - this.confirmedCount;
+if (pending >= this.batchSize) {
+  this.batchLocked = true;   // stop scanning until confirm batch
+}
         return true;
       } catch (err: any) {
         // ✅ Server mismatch error (409) will land here and show in UI
@@ -287,6 +363,96 @@ export const useInboundStore = defineStore("inbound", {
         return false;
       }
     },
+
+    async confirmBatch() {
+  this.clearMessages();
+
+  const pending = this.current.items.length - this.confirmedCount;
+
+  // ✅ allow confirm only when there is something pending (1..5)
+  if (pending <= 0) {
+    this.error = "No items to confirm in the current batch.";
+    return false;
+  }
+
+  // ✅ if you want to prevent confirming more than 5 (shouldn't happen)
+  if (pending > this.batchSize) {
+    this.error = `Batch cannot exceed ${this.batchSize} items. Reset batch.`;
+    return false;
+  }
+
+  this.confirmedCount += pending;
+  this.batchLocked = false;
+
+  this.success = "Batch confirmed.";
+  return true;
+},
+
+async resetBatch() {
+  this.clearMessages();
+
+  if (!this.sessionId) {
+    this.error = "No active session.";
+    return false;
+  }
+
+  const pendingItems = this.current.items.slice(this.confirmedCount);
+  if (pendingItems.length === 0) {
+    this.error = "No pending batch items to reset.";
+    return false;
+  }
+
+  try {
+    // ✅ Backend must delete these rows in PostgreSQL
+    // await deleteInboundItems(this.sessionId, this.operatorName, pendingItems.map(i => i.serial));
+
+    // ✅ Local remove
+    this.current.items.splice(this.confirmedCount);
+    this.batchLocked = false;
+
+    this.success = "Current batch reset.";
+    return true;
+  } catch (err: any) {
+    this.error = err?.response?.data?.error || err?.message || "Failed to reset batch";
+    return false;
+  }
+},
+
+async deletePendingItem(serial: string) {
+  this.clearMessages();
+
+  if (!this.sessionId) {
+    this.error = "No active session.";
+    return false;
+  }
+
+  const idx = this.current.items.findIndex(i => i.serial === serial);
+  if (idx < 0) return false;
+
+  // block deleting confirmed items
+  if (idx < this.confirmedCount) {
+    this.error = "Cannot delete confirmed items. Reset only works on the current batch.";
+    return false;
+  }
+
+  try {
+    // ✅ Backend delete
+    // await deleteInboundItems(this.sessionId, this.operatorName, [serial]);
+
+    // ✅ Local delete
+    this.current.items.splice(idx, 1);
+
+    // if batch was full, unlock after delete
+    const pending = this.current.items.length - this.confirmedCount;
+    if (pending < this.batchSize) this.batchLocked = false;
+
+    this.success = "Item deleted.";
+    return true;
+  } catch (err: any) {
+    this.error = err?.response?.data?.error || err?.message || "Failed to delete item";
+    return false;
+  }
+},
 
     /**
      * ✅ Keeps session lock alive while scanning
@@ -388,6 +554,7 @@ export const useInboundStore = defineStore("inbound", {
       this.skuValidated = false
       this.scanLocked = false
       this.scanCompleted = false
+      this.qtyLocked = false;
 
       this.clearMessages()
     },
@@ -436,6 +603,7 @@ export const useInboundStore = defineStore("inbound", {
       this.scanLocked = false;
       this.scanCompleted = false;
       this.clearMessages();
+      this.qtyLocked = false;
 
       return true;
     },
@@ -448,5 +616,6 @@ export const useInboundStore = defineStore("inbound", {
       this.resetCurrentInnerbox();
       this.clearMessages();
     },
+
   },
 });
