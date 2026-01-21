@@ -1,5 +1,5 @@
 <template>
-  <header class="bg-gray-600 h-20 px-6 flex items-center justify-between">
+  <header class="bg-gray-600 h-20 px-6 flex items-center">
     <!-- LEFT: Logo -->
     <div class="flex items-center">
       <img

@@ -4,20 +4,18 @@ import { useInboundStore } from '../../stores/inbound'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { validateSku } from '../../src/api/inbounds'
-import { useRouter } from "vue-router"
-import Slider from "primevue/slider";
+import { useRouter } from 'vue-router'
+import Slider from 'primevue/slider'
+import Button from 'primevue/button'
 
 // set your allowed max quantity here
-const qtyMax = 50;
+const qtyMax = 50
 
 const router = useRouter()
-
-
 
 type Step = 'OPERATOR' | 'HOME' | 'NEW_PACKAGE' | 'SCAN' | 'CONFIRM'
 const step = ref<Step>('OPERATOR')
 type VerifyStage = 'EMPTY' | 'FIRST' | 'CONFIRMED'
-
 
 const store = useInboundStore()
 const toast = useToast()
@@ -28,7 +26,7 @@ const outerBoxInput = ref('')
 const innerBoxInput = ref('')
 const outerConfirmInput = ref('')
 const innerConfirmInput = ref('')
-const qtyInput = ref<number>(1) // ✅ Slider needs a number
+const qtyInput = ref<number>(1)
 const skuInput = ref('')
 const serialInput = ref('')
 
@@ -45,7 +43,7 @@ const dateLabel = computed(() => store.session?.date ?? store.date)
 const outerBoxLabel = computed(() => store.session?.outerBoxId ?? outerBoxInput.value ?? '')
 
 // -----------------------------
-// ✅ Outer / Inner / Qty verification (2x scan for boxes)
+// Outer / Inner / Qty verification (2x scan for boxes)
 // -----------------------------
 const outerStage = ref<VerifyStage>('EMPTY')
 const innerStage = ref<VerifyStage>('EMPTY')
@@ -58,30 +56,26 @@ const outerVerified = computed(() => outerStage.value === 'CONFIRMED')
 const innerVerified = computed(() => innerStage.value === 'CONFIRMED')
 const qtyVerified = computed(() => qtyStage.value === 'CONFIRMED')
 
-// strict chaining + lock previous after verified
-
-const qtyDisabled = computed(() =>
-  !innerVerified.value ||
-  qtyVerified.value ||
-  store.qtyLocked ||
-  store.current.items.length > 0  // once scanning starts, lock qty
+const qtyDisabled = computed(
+  () =>
+    !innerVerified.value ||
+    qtyVerified.value ||
+    store.qtyLocked ||
+    store.current.items.length > 0 // once scanning starts, lock qty
 )
 
 const operatorInput = ref('')
 const operatorEl = ref<HTMLInputElement | null>(null)
 
 function goToOperator() {
-  // hard reset (DB + store)
   store.resetAll()
 
-  // clear UI inputs
   outerBoxInput.value = ''
   innerBoxInput.value = ''
   qtyInput.value = 1
   skuInput.value = ''
   serialInput.value = ''
 
-  // reset verification states
   outerStage.value = 'EMPTY'
   innerStage.value = 'EMPTY'
   qtyStage.value = 'EMPTY'
@@ -89,15 +83,12 @@ function goToOperator() {
   innerFirst.value = ''
   skuStage.value = 'EMPTY'
 
-  // go to operator screen
   step.value = 'OPERATOR'
-
   nextTick(() => operatorEl.value?.focus())
 }
 
 const outerConfirmDisabled = computed(() => outerStage.value !== 'FIRST' || outerVerified.value)
 const innerConfirmDisabled = computed(() => innerStage.value !== 'FIRST' || innerVerified.value)
-
 
 function saveOperator() {
   const ok = store.setOperator(operatorInput.value)
@@ -109,13 +100,11 @@ function saveOperator() {
 }
 
 function goEditPackages() {
-  router.push("/inbound/edit")
+  router.push('/inbound/edit')
 }
-
 function goClearPackages() {
-  router.push("/inbound/reset")
+  router.push('/inbound/reset')
 }
-
 
 function verifyOuterFirst() {
   store.clearMessages()
@@ -124,8 +113,6 @@ function verifyOuterFirst() {
 
   outerFirst.value = v
   outerStage.value = 'FIRST'
-
-  // lock first input (don’t clear it)
   outerBoxInput.value = v
   outerConfirmInput.value = ''
 
@@ -147,10 +134,8 @@ function verifyOuterConfirm() {
 
   outerStage.value = 'CONFIRMED'
   toast.add({ severity: 'success', summary: 'Confirmed', detail: 'Outer Box confirmed.', life: 1200 })
-
   nextTick(() => innerEl.value?.focus())
 }
-
 
 function verifyInnerFirst() {
   store.clearMessages()
@@ -159,7 +144,6 @@ function verifyInnerFirst() {
 
   innerFirst.value = v
   innerStage.value = 'FIRST'
-
   innerBoxInput.value = v
   innerConfirmInput.value = ''
 
@@ -181,12 +165,8 @@ function verifyInnerConfirm() {
 
   innerStage.value = 'CONFIRMED'
   toast.add({ severity: 'success', summary: 'Confirmed', detail: 'Inner Box confirmed.', life: 1200 })
-
-  // next step: quantity
-  // if you still have qtyEl focus, swap this to scrollIntoView
   nextTick(() => qtyEl.value?.focus?.())
 }
-
 
 function verifyQty() {
   store.clearMessages()
@@ -200,42 +180,27 @@ function verifyQty() {
 }
 
 // -----------------------------
-// ✅ SKU / Serial flow (SKU must be scanned again for every product)
+// SKU / Serial flow (SKU must be scanned again for every product)
 // -----------------------------
 const skuStage = ref<'EMPTY' | 'CONFIRMED'>('EMPTY')
 const skuVerified = computed(() => skuStage.value === 'CONFIRMED')
 
-// strict disable chain
 const skuDisabled = computed(() => {
-  // locked by server completion
-  if (store.scanLocked) return true;
+  if (store.scanLocked) return true
+  if (store.batchLocked || store.isBatchFull) return true
 
-  // ✅ batch is full → stop scanning until confirm/reset batch
-  if (store.batchLocked || store.isBatchFull) return true;
+  if (store.current.expectedQty > 0 && store.current.items.length >= store.current.expectedQty) return true
 
-  // ✅ expected quantity reached → stop scanning
-  if (
-    store.current.expectedQty > 0 &&
-    store.current.items.length >= store.current.expectedQty
-  ) {
-    return true;
-  }
-
-  // normal per-item SKU cycle
-  return skuVerified.value;
-});
-
+  return skuVerified.value
+})
 
 const serialDisabled = computed(() => store.scanLocked || !skuVerified.value)
-
-// nice small helper text
 const skuPill = computed(() => (skuVerified.value ? store.current.sku : ''))
 
 async function onSkuEnter() {
   const incoming = skuInput.value.trim()
   if (!incoming) return
 
-  // format validation
   const ok = store.setSku(incoming)
   if (!ok || store.error) {
     skuStage.value = 'EMPTY'
@@ -244,11 +209,10 @@ async function onSkuEnter() {
     return
   }
 
-  // ✅ server validation BEFORE serial
   try {
     await validateSku(store.sessionId!, store.current.sku, store.operatorName)
   } catch (err: any) {
-    store.error = err?.response?.data?.error || "SKU mismatch"
+    store.error = err?.response?.data?.error || 'SKU mismatch'
     store.current.sku = ''
     store.skuValidated = false
     skuStage.value = 'EMPTY'
@@ -265,55 +229,50 @@ async function onSkuEnter() {
 function focusSku() {
   nextTick(() => {
     setTimeout(() => {
-      skuEl.value?.focus();
-      skuEl.value?.select?.();
-    }, 0);
-  });
+      skuEl.value?.focus()
+      skuEl.value?.select?.()
+    }, 0)
+  })
 }
 
 async function onSerialEnter() {
-  // Batch locked → stop
   if (store.batchLocked) {
     toast.add({
-      severity: "warn",
-      summary: "Batch Full",
-      detail: "Confirm or reset the batch to continue.",
+      severity: 'warn',
+      summary: 'Batch Full',
+      detail: 'Confirm or reset the batch to continue.',
       life: 2000
-    });
+    })
 
-    // ✅ clear fields + unlock SKU stage
-    serialInput.value = "";
-    skuInput.value = "";
-    skuStage.value = "EMPTY";
-    store.current.sku = "";
-    store.skuValidated = false;
+    serialInput.value = ''
+    skuInput.value = ''
+    skuStage.value = 'EMPTY'
+    store.current.sku = ''
+    store.skuValidated = false
 
-    focusSku();
-    return;
+    focusSku()
+    return
   }
 
-  const incoming = serialInput.value.trim();
-  if (!incoming) return;
+  const incoming = serialInput.value.trim()
+  if (!incoming) return
 
-  const ok = await store.addSerial(incoming);
+  const ok = await store.addSerial(incoming)
 
   if (!ok) {
-    // ✅ error: clear entered serial + force SKU scan again
-    serialInput.value = "";
-    skuInput.value = "";
-    skuStage.value = "EMPTY";
-    store.current.sku = "";
-    store.skuValidated = false;
-
-    focusSku();
-    return;
+    serialInput.value = ''
+    skuInput.value = ''
+    skuStage.value = 'EMPTY'
+    store.current.sku = ''
+    store.skuValidated = false
+    focusSku()
+    return
   }
 
-  // ✅ success: clear and go back to SKU
-  serialInput.value = "";
-  skuInput.value = "";
-  skuStage.value = "EMPTY";
-  focusSku();
+  serialInput.value = ''
+  skuInput.value = ''
+  skuStage.value = 'EMPTY'
+  focusSku()
 }
 
 // -----------------------------
@@ -341,41 +300,33 @@ watch(
   () => store.goOperatorRequested,
   (val) => {
     if (!val) return
-
-    // ✅ just navigate
     step.value = 'OPERATOR'
-
-    // ✅ clear the request so it can be triggered again
     store.clearGoOperatorRequest()
-
     nextTick(() => operatorEl.value?.focus())
   }
 )
 
-// ✅ handle it immediately on mount / route return
 if (store.goHomeRequested) {
-  step.value = "HOME";
-  store.clearGoHomeRequest();
+  step.value = 'HOME'
+  store.clearGoHomeRequest()
 }
 
 watch(
   () => store.goHomeRequested,
   (val) => {
-    if (!val) return;
-    step.value = "HOME";
-    store.clearGoHomeRequest();
+    if (!val) return
+    step.value = 'HOME'
+    store.clearGoHomeRequest()
   },
   { immediate: true }
-);
-
-
+)
 
 // -----------------------------
 // navigation
 // -----------------------------
 async function goNewPackage() {
   step.value = 'NEW_PACKAGE'
-  await store.resetCurrentInnerbox()   // ✅ await
+  await store.resetCurrentInnerbox()
   store.clearMessages()
 
   outerBoxInput.value = store.session?.outerBoxId ?? ''
@@ -394,7 +345,6 @@ async function goNewPackage() {
   nextTick(() => (outerVerified.value ? innerEl.value?.focus() : outerEl.value?.focus()))
 }
 
-
 async function onNewPackageNext() {
   store.clearMessages()
 
@@ -412,8 +362,8 @@ async function onNewPackageNext() {
   const ok = await store.beginInnerbox(innerBoxInput.value, qtyInput.value ?? 0)
   if (!ok) return
 
+  expectedLenLocked.value = null;
 
-  // reset scan fields and force SKU per product
   step.value = 'SCAN'
   skuInput.value = ''
   serialInput.value = ''
@@ -426,7 +376,27 @@ async function onConfirmBatch() {
   const ok = await store.confirmBatch();
   if (!ok) return;
 
-  // ✅ After batch confirm, reset SKU cycle + focus SKU
+  // ✅ lock baseline for NEXT batches from ALL confirmed history
+  const histMode = modeLenOfSerials(confirmedItems.value.map(i => i.serial));
+  if (histMode != null) expectedLenLocked.value = histMode;
+
+  // reset SKU cycle (your existing code)
+  skuInput.value = "";
+  skuStage.value = "EMPTY";
+  store.current.sku = "";
+  store.skuValidated = false;
+
+  nextTick(() => {
+    skuEl.value?.focus();
+    skuEl.value?.select?.();
+  });
+}
+
+async function onresetBatch() {
+  const ok = await store.resetBatch();
+  if (!ok) return;
+
+  // reset SKU cycle (your existing code)
   skuInput.value = "";
   skuStage.value = "EMPTY";
   store.current.sku = "";
@@ -439,19 +409,10 @@ async function onConfirmBatch() {
 }
 
 
-
 // -----------------------------
-// ✅ Scan Complete = go directly to CONFIRM (no Next button)
+// Scan Complete -> CONFIRM
 // -----------------------------
-const canScanComplete = computed(() => {
-  return (
-    store.current.items.length > 0 &&   // at least 1 SKU + SN scanned
-    !store.error &&                     // no active error
-    !store.scanLocked                   // not already locked
-  )
-})
-
-
+const canScanComplete = computed(() => store.current.items.length > 0 && !store.error && !store.scanLocked)
 
 function scanCompleteAndGoConfirm() {
   if (!canScanComplete.value) {
@@ -463,29 +424,23 @@ function scanCompleteAndGoConfirm() {
     })
     return
   }
-
-  // finalize scanning (keeps your existing store behavior)
   step.value = 'CONFIRM'
 }
 
 // -----------------------------
 // reset current innerbox
 // -----------------------------
-
 function requireOuterRescan() {
-  // unlock + force rescan UI
   outerStage.value = 'EMPTY'
   outerFirst.value = ''
-  outerBoxInput.value = ''      // force user to scan again
+  outerBoxInput.value = ''
 
-  // also reset downstream fields/stages
   innerStage.value = 'EMPTY'
   innerFirst.value = ''
   innerBoxInput.value = ''
   qtyStage.value = 'EMPTY'
   qtyInput.value = 1
 
-  // scan fields
   skuInput.value = ''
   serialInput.value = ''
 
@@ -495,6 +450,7 @@ function requireOuterRescan() {
 async function resetCurrentInnerbox() {
   const ok = await store.resetCurrentInnerbox()
   if (!ok) return
+
   skuInput.value = ''
   serialInput.value = ''
   skuStage.value = 'EMPTY'
@@ -504,7 +460,6 @@ async function resetCurrentInnerbox() {
   innerBoxInput.value = ''
   qtyInput.value = 1
 
-  // reset inner/qty verification
   innerStage.value = 'EMPTY'
   qtyStage.value = 'EMPTY'
   innerFirst.value = ''
@@ -512,7 +467,6 @@ async function resetCurrentInnerbox() {
   nextTick(() => innerEl.value?.focus())
 }
 
-// ✅ Confirm dialogs
 function confirmResetCurrentInnerbox() {
   confirm.require({
     header: 'Confirm Reset',
@@ -530,15 +484,12 @@ function confirmResetCurrentInnerbox() {
 async function confirmNextInnerbox() {
   store.clearMessages()
 
-  // 1) ✅ server-side confirm (qty check + mark confirmed)
   const okFinalize = await store.finalizeInnerbox()
   if (!okFinalize) return
 
-  // 2) ✅ local store + reset current
   const okLocal = await store.confirmInnerbox()
   if (!okLocal) return
 
-  // 3) go to next package + force outer rescan
   step.value = 'NEW_PACKAGE'
 
   outerBoxInput.value = ''
@@ -560,34 +511,25 @@ async function confirmNextInnerbox() {
 }
 
 function confirmGoHome() {
-  // ✅ Detect if anything is in progress
-  const hasActiveInnerBox =
-    !!store.sessionId ||
-    !!store.current.innerBoxId ||
-    store.current.items.length > 0;
+  const hasActiveInnerBox = !!store.sessionId || !!store.current.innerBoxId || store.current.items.length > 0
 
-  // ✅ No active work → go home silently
   if (!hasActiveInnerBox) {
-    goToOperator();
-    return;
+    goToOperator()
+    return
   }
 
-  // ⚠️ Active innerbox → warn user
   confirm.require({
-    header: "Go Home?",
-    message: "This will reset the current InnerBox and clear all in-progress scans. Do you want to continue?",
-    icon: "pi pi-exclamation-triangle",
-    acceptLabel: "Yes, Reset & Go Home",
-    rejectLabel: "Cancel",
+    header: 'Go Home?',
+    message: 'This will reset the current InnerBox and clear all in-progress scans. Do you want to continue?',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Yes, Reset & Go Home',
+    rejectLabel: 'Cancel',
     accept: async () => {
-      // reset server + local state
-      await store.resetCurrentInnerbox();
-      goToOperator();
-    },
-  });
+      await store.resetCurrentInnerbox()
+      goToOperator()
+    }
+  })
 }
-
-
 
 async function confirmAndGoHome() {
   store.clearMessages()
@@ -598,10 +540,8 @@ async function confirmAndGoHome() {
   const okLocal = await store.confirmInnerbox()
   if (!okLocal) return
 
-  // ✅ VERY IMPORTANT: clear session so outerBoxId won't auto-fill again
   store.resetAll()
 
-  // ✅ Clear UI + verification states
   outerBoxInput.value = ''
   innerBoxInput.value = ''
   qtyInput.value = 1
@@ -620,10 +560,8 @@ async function confirmAndGoHome() {
   step.value = 'HOME'
 }
 
-
-
 // -----------------------------
-// Confirm page “saved data” helpers
+// Confirm page summary
 // -----------------------------
 const confirmSummary = computed(() => ({
   outerBoxId: outerBoxLabel.value,
@@ -632,64 +570,210 @@ const confirmSummary = computed(() => ({
   scanned: store.current.items?.length ?? 0
 }))
 
-defineEmits<{
-  (e: 'go-operator'): void
-}>()
+defineEmits<{ (e: 'go-operator'): void }>()
 
-const isLoggedIn = computed(() => !!store.operatorName?.trim());
+const isLoggedIn = computed(() => !!store.operatorName?.trim())
 
 function goHomeStep() {
-  // ✅ go to HOME step (do not reset operator)
-  step.value = "HOME";
-}
+  const hasActive =
+    !!store.sessionId ||
+    !!store.current.innerBoxId ||
+    store.current.items.length > 0 ||
+    !!store.session?.outerBoxId;
 
-function logout() {
+  if (!hasActive) {
+    step.value = "HOME";
+    return;
+  }
+
   confirm.require({
-    header: "Logout",
-    message: "Logout will reset the current scanning session. Continue?",
+    header: "Go Home?",
+    message: "This will reset the current session (OuterBox + InnerBox) and clear all scans. Continue?",
     icon: "pi pi-exclamation-triangle",
-    acceptLabel: "Yes, Logout",
+    acceptLabel: "Yes, Reset & Go Home",
     rejectLabel: "Cancel",
     accept: async () => {
-      // ✅ fully reset everything
-      store.resetAll();
-      operatorInput.value = "";
-      step.value = "OPERATOR";
-      nextTick(() => operatorEl.value?.focus());
+      await store.resetAll();              // ✅ clears store.session too
+      expectedLenLocked.value = null;      // ✅ reset yellow baseline
+
+      // ✅ clear local inputs too
+      outerBoxInput.value = "";
+      innerBoxInput.value = "";
+      outerConfirmInput.value = "";
+      innerConfirmInput.value = "";
+      qtyInput.value = 1;
+      skuInput.value = "";
+      serialInput.value = "";
+
+      outerStage.value = "EMPTY";
+      innerStage.value = "EMPTY";
+      qtyStage.value = "EMPTY";
+
+      step.value = "HOME";
     },
   });
 }
+
+
+function logout() {
+  confirm.require({
+    header: 'Logout',
+    message: 'Logout will reset the current scanning session. Continue?',
+    icon: 'pi pi-exclamation-triangle',
+    acceptLabel: 'Yes, Logout',
+    rejectLabel: 'Cancel',
+    accept: async () => {
+      store.resetAll()
+      operatorInput.value = ''
+      step.value = 'OPERATOR'
+      nextTick(() => operatorEl.value?.focus())
+    }
+  })
+}
+
+// -----------------------------
+// Yellow validation (Serial length anomalies in current batch)
+// - Only evaluate when batch is full
+// - Mode length, outliers are yellow
+// - If all unique => all yellow
+// -----------------------------
+
+const expectedLenLocked = ref<number | null>(null);
+
+// serial length helper
+const lenOf = (serial?: string | null) => (serial ?? "").trim().length;
+
+// mode (majority) length helper
+function modeLenOfSerials(serials: Array<string | null | undefined>): number | null {
+  const lengths = serials.map(s => lenOf(s)).filter(n => n > 0);
+  if (lengths.length === 0) return null;
+
+  const counts = new Map<number, number>();
+  for (const n of lengths) counts.set(n, (counts.get(n) || 0) + 1);
+
+  let best = lengths[0]!;
+  let bestCount = 0;
+  for (const [n, c] of counts.entries()) {
+    if (c > bestCount) {
+      best = n;
+      bestCount = c;
+    }
+  }
+  return best;
+}
+
+
+type PendingLengthInfo = {
+  batchFull: boolean
+  modeLen: number | null
+  allUnique: boolean
+  lenOf: (serial?: string | null) => number
+  isYellow: (serial?: string | null) => boolean
+}
+
+const confirmedItems = computed(() => {
+  const all = store.current.items || [];
+  const pendingCount = store.pendingCount ?? (store.pendingItems?.length ?? 0);
+  const confirmedCount = Math.max(0, all.length - pendingCount);
+  return all.slice(0, confirmedCount);
+});
+
+watch(
+  () => (store.pendingItems ?? []).map(i => i.serial),
+  () => {
+    // If we already have a baseline from previous batches, keep it
+    if (expectedLenLocked.value != null) return;
+
+    // If we have confirmed history, lock baseline from confirmed (stable)
+    const hist = modeLenOfSerials(confirmedItems.value.map(i => i.serial));
+    if (hist != null) expectedLenLocked.value = hist;
+
+    // ✅ Do NOT lock from the first few pending scans
+  },
+  { immediate: true }
+);
+
+
+
+
+
+const hasSerialLenMismatch = computed(() =>
+  (store.pendingItems ?? []).some(i => pendingLengthInfo.value.isYellow(i.serial))
+);
+
+
+const pendingLengthInfo = computed<PendingLengthInfo>(() => {
+  const items = store.pendingItems || [];
+  const serials = items.map(i => i.serial);
+
+  // baseline priority:
+  // 1) locked baseline from previous confirmed batches
+  // 2) if no locked baseline yet, use majority from current pending (only after we have at least 2)
+const baselineLen =
+  expectedLenLocked.value ??
+  ((serials.length >= 2) ? modeLenOfSerials(serials) : null);
+
+
+  if (!baselineLen) {
+    return {
+      batchFull: store.pendingCount === store.batchSize && store.batchSize > 0,
+      modeLen: null,
+      allUnique: false,
+      lenOf,
+      isYellow: () => false,
+    };
+  }
+
+  return {
+    batchFull: store.pendingCount === store.batchSize && store.batchSize > 0,
+    modeLen: baselineLen,
+    allUnique: false,
+    lenOf,
+    isYellow: (serial?: string | null) => {
+      const l = lenOf(serial);
+      if (!l) return false;
+      return l !== baselineLen;
+    },
+  };
+});
+
+
+
+
+const canEvaluateSerials = computed(() => (store.pendingItems?.length ?? 0) >= 2);
+
 
 </script>
 
 <template>
   <title>Inbound Inventory</title>
-  <!-- Top Bar -->
-  <!-- Left -->
-      <!-- ✅ Top Header -->
-<<div class="sticky top-0 z-20 bg-white border-b border-gray-200">
+
+  <!-- Header -->
+  <div class="sticky top-0 z-20 bg-white border-b border-gray-200">
+    <div class="sticky top-0 z-20 bg-white border-b border-gray-200">
   <div class="mx-auto max-w-6xl px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between gap-3">
-    <!-- Left -->
-    <div class="min-w-0 flex items-center gap-2 sm:gap-3">
+
+    <!-- LEFT: Title + Operator (stacked, aligned) -->
+    <div class="min-w-0 flex flex-col leading-tight">
       <div class="font-semibold text-gray-900 text-sm sm:text-base whitespace-nowrap">
         Inbound Inventory
       </div>
 
       <div
         v-if="isLoggedIn"
-        class="text-[11px] sm:text-xs text-gray-500 min-w-0 truncate"
+        class="text-[11px] sm:text-xs text-gray-500 truncate"
         title="Logged in operator"
       >
-        Logged in as
+        Operator:
         <span class="font-semibold text-gray-800 ml-1">
           {{ store.operatorName }}
         </span>
       </div>
     </div>
 
-    <!-- Right -->
+    <!-- RIGHT: Actions -->
     <div v-if="isLoggedIn" class="flex items-center gap-2 flex-shrink-0">
-      <!-- Home -->
+      <!-- HOME -->
       <button
         type="button"
         class="px-3 py-2 rounded-lg bg-gray-100 border border-gray-200 hover:bg-gray-200 flex items-center gap-2 text-black"
@@ -699,7 +783,7 @@ function logout() {
         <span class="hidden sm:inline text-sm">Home</span>
       </button>
 
-      <!-- Logout -->
+      <!-- LOGOUT -->
       <button
         type="button"
         class="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 flex items-center gap-2"
@@ -709,18 +793,17 @@ function logout() {
         <span class="hidden sm:inline text-sm">Logout</span>
       </button>
     </div>
+
   </div>
 </div>
 
+  </div>
 
-
-
-  <div v-if="step === 'OPERATOR'" class="h-[calc(100vh-96px)] px-4 flex items-center">
+  <!-- OPERATOR -->
+  <div v-if="step === 'OPERATOR'" class="h-[calc(100vh-96px)] px-4 flex items-center bg-gray-50">
     <div class="mx-auto w-full max-w-md bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
       <div class="text-xl font-semibold text-center">Operator Name</div>
-      <div class="text-sm text-gray-500 text-center mt-2">
-        Enter your username before starting scanning.
-      </div>
+      <div class="text-sm text-gray-500 text-center mt-2">Enter your username before starting scanning.</div>
 
       <div class="mt-6">
         <label class="text-xs text-gray-500">Username</label>
@@ -735,134 +818,104 @@ function logout() {
     </div>
   </div>
 
-
-  <div class="text-gray-900 w-full bg-gray-50 min-h-[calc(100vh-64px)]">
+  <!-- MAIN WRAP -->
+  <div v-else class="text-gray-900 w-full bg-gray-50 min-h-[calc(100vh-64px)]">
     <!-- HOME -->
     <div v-if="step === 'HOME'" class="h-[calc(100vh-96px)] px-4 flex items-center">
       <div class="mx-auto w-full max-w-md sm:max-w-4xl text-center">
-
-        <!-- Title -->
         <div class="mb-4 sm:mb-6">
           <div class="font-semibold tracking-wide text-2xl sm:text-2xl md:text-[30px]">
             Inbound Inventory Tracking System
           </div>
 
-          <!-- Operator -->
           <div class="mt-3 text-sm text-gray-600">
-            Logged in as
-            <span class="font-semibold text-gray-900 ml-1">
-              {{ store.operatorName }}
-            </span>
+            Operator:
+            <span class="font-semibold text-gray-900 ml-1">{{ store.operatorName }}</span>
           </div>
         </div>
 
-        <!-- Actions -->
         <div class="mt-10 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-4 sm:gap-8">
-          <!-- New Package -->
-          <button class="w-full sm:w-72 h-24 rounded-2xl border border-gray-200 bg-white shadow-sm
-               hover:shadow-lg hover:-translate-y-0.5 transition
-               flex items-center justify-center" @click="goNewPackage">
-            <span class="text-lg sm:text-base font-semibold tracking-wide">
-              NEW PACKAGE
-            </span>
+          <button
+            class="w-full sm:w-72 h-24 rounded-2xl border border-gray-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition flex items-center justify-center"
+            @click="goNewPackage">
+            <span class="text-lg sm:text-base font-semibold tracking-wide">NEW PACKAGE</span>
           </button>
 
-          <!-- Edit Packages -->
-          <button class="w-full sm:w-72 h-24 rounded-2xl border border-gray-200 bg-white shadow-sm
-               hover:shadow-lg hover:-translate-y-0.5 transition
-               flex items-center justify-center" @click="goClearPackages">
-            <span class="text-lg sm:text-base font-semibold tracking-wide">
-              CLEAR PACKAGES
-            </span>
+          <button
+            class="w-full sm:w-72 h-24 rounded-2xl border border-gray-200 bg-white shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition flex items-center justify-center"
+            @click="goClearPackages">
+            <span class="text-lg sm:text-base font-semibold tracking-wide">CLEAR PACKAGES</span>
           </button>
         </div>
       </div>
     </div>
-
 
     <!-- NEW PACKAGE -->
     <div v-if="step === 'NEW_PACKAGE'" class="px-4 py-6">
       <div class="mx-auto max-w-lg">
         <div class="flex items-center justify-between gap-3">
           <div class="text-lg font-semibold tracking-wide">New Package</div>
-          <div class="text-xs text-gray-500">
-            Operator: <span class="font-semibold text-gray-800">{{ store.operatorName }}</span>
-          </div>
-          <div class="text-xs border border-gray-200 bg-white px-3 py-2 rounded-xl shadow-sm">
-            <div class="text-gray-500">Date</div>
-            <div class="font-semibold">{{ dateLabel }}</div>
-          </div>
+
+            <div class="shrink-0 text-[10px] border border-gray-200 bg-white px-2 py-1 rounded-lg">
+              <span class="text-gray-500">Date</span>
+              <span class="font-semibold text-gray-900 ml-1">{{ dateLabel }}</span>
+            </div>
         </div>
 
         <div class="mt-6 bg-white border border-gray-200 rounded-2xl shadow-sm p-5 sm:p-6">
           <div class="grid grid-cols-1 gap-4 md:gap-6 items-end">
-
             <!-- OUTER -->
             <div class="w-full text-left">
-              <!-- First scan hint -->
-              <div class="text-xs text-gray-500 mb-2">
-                Scan or Type the Outer Box ID
-              </div>
+              <div class="text-xs text-gray-500 mb-2">Scan or Type the Outer Box ID</div>
 
-              <!-- First scan input -->
               <div class="relative">
-                <input ref="outerEl" v-model="outerBoxInput" :disabled="outerStage !== 'EMPTY' || outerVerified" class="w-full border border-gray-300 px-4 py-3 text-center outline-none rounded-xl
-             bg-white disabled:bg-gray-100 disabled:cursor-not-allowed pr-11" placeholder="Outer Box ID"
-                  @keydown.enter.prevent="verifyOuterFirst" />
+                <input ref="outerEl" v-model="outerBoxInput" :disabled="outerStage !== 'EMPTY' || outerVerified"
+                  class="w-full border border-gray-300 px-4 py-3 text-center outline-none rounded-xl bg-white disabled:bg-gray-100 disabled:cursor-not-allowed pr-11"
+                  placeholder="Outer Box ID" @keydown.enter.prevent="verifyOuterFirst" />
                 <i v-if="outerStage !== 'EMPTY'"
                   class="pi pi-check-circle absolute right-3 top-1/2 -translate-y-1/2 text-green-600" />
               </div>
 
-              <!-- Confirm hint (NEW LINE, NEW BLOCK) -->
               <div v-if="outerStage === 'FIRST'" class="text-xs text-blue-600 mt-3 mb-2">
                 Confirm Outer Box ID (scan again)
               </div>
 
-              <!-- Confirm input -->
               <div v-if="outerStage === 'FIRST'" class="relative">
-                <input ref="outerConfirmEl" v-model="outerConfirmInput" :disabled="outerConfirmDisabled" class="w-full border border-gray-300 px-4 py-3 text-center outline-none rounded-xl
-             bg-white disabled:bg-gray-100 disabled:cursor-not-allowed pr-11" placeholder="Confirm Outer Box ID"
-                  @keydown.enter.prevent="verifyOuterConfirm" />
+                <input ref="outerConfirmEl" v-model="outerConfirmInput" :disabled="outerConfirmDisabled"
+                  class="w-full border border-gray-300 px-4 py-3 text-center outline-none rounded-xl bg-white disabled:bg-gray-100 disabled:cursor-not-allowed pr-11"
+                  placeholder="Confirm Outer Box ID" @keydown.enter.prevent="verifyOuterConfirm" />
               </div>
             </div>
 
             <!-- INNER -->
             <div class="w-full text-left">
-              <!-- First scan hint -->
-              <div class="text-xs text-gray-500 mb-2">
-                Scan or Type the Inner Box ID
-              </div>
+              <div class="text-xs text-gray-500 mb-2">Scan or Type the Inner Box ID</div>
 
-              <!-- First scan input -->
               <div class="relative">
                 <input ref="innerEl" v-model="innerBoxInput"
-                  :disabled="!outerVerified || innerStage !== 'EMPTY' || innerVerified" class="w-full border border-gray-300 px-4 py-3 text-center outline-none rounded-xl
-             bg-white disabled:bg-gray-100 disabled:cursor-not-allowed pr-11" placeholder="Inner Box ID"
-                  @keydown.enter.prevent="verifyInnerFirst" />
+                  :disabled="!outerVerified || innerStage !== 'EMPTY' || innerVerified"
+                  class="w-full border border-gray-300 px-4 py-3 text-center outline-none rounded-xl bg-white disabled:bg-gray-100 disabled:cursor-not-allowed pr-11"
+                  placeholder="Inner Box ID" @keydown.enter.prevent="verifyInnerFirst" />
                 <i v-if="innerStage !== 'EMPTY'"
                   class="pi pi-check-circle absolute right-3 top-1/2 -translate-y-1/2 text-green-600" />
               </div>
 
-              <!-- Confirm hint -->
               <div v-if="innerStage === 'FIRST'" class="text-xs text-blue-600 mt-3 mb-2">
                 Confirm Inner Box ID (scan again)
               </div>
 
-              <!-- Confirm input -->
               <div v-if="innerStage === 'FIRST'" class="relative">
-                <input ref="innerConfirmEl" v-model="innerConfirmInput" :disabled="innerConfirmDisabled" class="w-full border border-gray-300 px-4 py-3 text-center outline-none rounded-xl
-             bg-white disabled:bg-gray-100 disabled:cursor-not-allowed pr-11" placeholder="Confirm Inner Box ID"
-                  @keydown.enter.prevent="verifyInnerConfirm" />
+                <input ref="innerConfirmEl" v-model="innerConfirmInput" :disabled="innerConfirmDisabled"
+                  class="w-full border border-gray-300 px-4 py-3 text-center outline-none rounded-xl bg-white disabled:bg-gray-100 disabled:cursor-not-allowed pr-11"
+                  placeholder="Confirm Inner Box ID" @keydown.enter.prevent="verifyInnerConfirm" />
               </div>
             </div>
-
 
             <!-- QTY -->
             <div class="w-full text-left">
               <div class="text-xs text-gray-500 mb-2">Product Quantity</div>
 
               <div class="border border-gray-300 rounded-xl bg-white px-4 py-4">
-                <!-- Top row: value + verified icon -->
                 <div class="flex items-center justify-between mb-3">
                   <div class="text-sm text-gray-500">Qty</div>
 
@@ -877,17 +930,13 @@ function logout() {
                   </div>
                 </div>
 
-                <!-- Slider (no auto-next) -->
-                <Slider v-model="qtyInput" :min="1" :max="qtyMax" :step="1" :disabled="qtyDisabled" class="w-full"
-                  @change="qtyStage = 'EMPTY'" <!-- sliding changes value, so un-verify --></Slider>
+                <Slider v-model="qtyInput" :min="1" :max="qtyMax" :step="1" :disabled="qtyDisabled" class="w-full" />
 
-                <!-- min/max labels -->
                 <div class="flex justify-between text-[11px] text-gray-400 mt-2">
                   <span>1</span>
                   <span>{{ qtyMax }}</span>
                 </div>
 
-                <!-- +/- buttons + Confirm -->
                 <div class="flex items-center justify-between gap-3 mt-4">
                   <Button icon="pi pi-minus" outlined class="w-12 h-12" :disabled="qtyDisabled || qtyInput <= 1"
                     @click="qtyInput = Math.max(1, qtyInput - 1); qtyStage = 'EMPTY'" />
@@ -899,8 +948,6 @@ function logout() {
                 </div>
               </div>
             </div>
-
-
           </div>
 
           <div class="flex flex-col sm:flex-row justify-end gap-3 mt-6">
@@ -923,51 +970,90 @@ function logout() {
     <div v-if="step === 'SCAN'" class="px-4 py-6">
       <div class="mx-auto max-w-5xl">
         <!-- header -->
-        <div class="flex items-start justify-between gap-3">
-          <div>
-            <div class="text-sm text-gray-500">Outer Box</div>
-            <div class="text-lg font-semibold">{{ outerBoxLabel }}</div>
+        <!-- Compact mobile header -->
+        <div class="mb-3">
+          <div class="flex items-center justify-between gap-2">
+            <!-- Left: Outer + Inner in two small lines but tight -->
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 text-[11px] text-gray-500">
+                <span class="shrink-0">Outer</span>
+                <span class="font-semibold text-gray-900 truncate text-[12px]">
+                  {{ outerBoxLabel }}
+                </span>
+              </div>
 
-            <div class="mt-2 text-sm text-gray-500">Inner Box</div>
-            <div class="text-lg font-semibold">{{ store.current.innerBoxId }}</div>
-          </div>
+              <div class="flex items-center gap-2 text-[11px] text-gray-500 mt-1">
+                <span class="shrink-0">Inner</span>
+                <span class="font-semibold text-gray-900 truncate text-[12px]">
+                  {{ store.current.innerBoxId }}
+                </span>
+              </div>
+            </div>
 
-          <div class="text-xs text-gray-500">
-            Operator: <span class="font-semibold text-gray-800">{{ store.operatorName }}</span>
-          </div>
-
-          <div class="text-xs border border-gray-200 bg-white px-3 py-2 rounded-xl shadow-sm">
-            <div class="text-gray-500">Date</div>
-            <div class="font-semibold">{{ dateLabel }}</div>
-          </div>
-        </div>
-
-        <!-- stats -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-6 mt-6">
-          <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 text-center">
-            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Entered Qty</div>
-            <div class="mt-2 text-2xl font-semibold text-gray-900">{{ store.current.expectedQty }}</div>
-          </div>
-
-          <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 text-center">
-            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Scanned</div>
-            <div class="mt-2 text-2xl font-semibold text-gray-900">{{ store.scannedProductsCurrent }}</div>
-          </div>
-
-          <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 text-center">
-            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Innerboxes</div>
-            <div class="mt-2 text-2xl font-semibold text-gray-900">{{ store.scannedInnerboxesCount }}</div>
-          </div>
-
-          <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 text-center">
-            <div class="text-[11px] text-gray-500 uppercase tracking-wide">Total Products</div>
-            <div class="mt-2 text-2xl font-semibold text-gray-900">{{ store.allProductsCountIncludingCurrent }}</div>
+            <!-- Right: Date small pill -->
+            <div class="shrink-0 text-[10px] border border-gray-200 bg-white px-2 py-1 rounded-lg">
+              <span class="text-gray-500">Date</span>
+              <span class="font-semibold text-gray-900 ml-1">{{ dateLabel }}</span>
+            </div>
           </div>
         </div>
 
-        <!-- scan area -->
+        <!-- ✅ Current batch list (FULL HEIGHT, NO SCROLL) -->
+         <div v-if="pendingLengthInfo.modeLen && hasSerialLenMismatch"
+  class="mb-3 rounded-xl border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+  Warning: Some serial numbers have a different length (expected length:
+  <b>{{ pendingLengthInfo.modeLen }}</b>).
+</div>
+
         <div class="mt-6 bg-white border border-gray-200 rounded-2xl shadow-sm p-5 sm:p-6">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 items-start">
+          <div class="text-xs text-gray-500 mb-2 flex items-center justify-between">
+            <span>Current items ({{ store.pendingCount }} / {{ store.batchSize }})</span>
+
+            <span v-if="pendingLengthInfo.modeLen" class="text-[11px] text-gray-400">
+              Expected length: <b>{{ pendingLengthInfo.modeLen }}</b>
+              <span v-if="store.pendingItems.length < 2" class="ml-1">(from previous)</span>
+            </span>
+          </div>
+
+          <div class="border border-gray-200 bg-gray-50 p-3 text-xs rounded-2xl">
+            <div v-for="item in store.pendingItems" :key="item.serial"
+              class="flex items-start justify-between gap-2 border rounded-xl px-3 py-2 mb-2 min-h-[56px]"
+              :class="pendingLengthInfo.isYellow(item.serial) ? 'bg-yellow-50 border-yellow-300' : 'bg-white border-gray-200'">
+              <div class="flex flex-col min-w-0">
+                <span class="font-semibold">SKU: {{ item.sku }}</span>
+
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="font-mono text-gray-700 truncate">SN: {{ item.serial }}</span>
+
+                  <span class="text-[10px] px-2 py-0.5 rounded-full border"
+                    :class="pendingLengthInfo.isYellow(item.serial) ? 'bg-yellow-100 border-yellow-300 text-yellow-800' : 'bg-gray-100 border-gray-200 text-gray-600'">
+                    {{ pendingLengthInfo.lenOf(item.serial) }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2 flex-shrink-0">
+                <i class="pi pi-check text-green-600 mt-1" />
+                <button class="text-gray-400 hover:text-red-600" @click="store.deletePendingItem(item.serial)"
+                  title="Delete">
+                  <i class="pi pi-trash text-xs" />
+                </button>
+              </div>
+            </div>
+
+            <div v-if="store.pendingItems.length === 0"
+              class="text-gray-400 text-center py-12 min-h-[120px] flex items-center justify-center">
+              No items in current batch
+            </div>
+          </div>
+
+          <div class="mt-2 text-[11px] text-gray-500 flex justify-between">
+            <span>Confirmed: <b>{{ store.confirmedCount }}</b></span>
+            <span>Total scanned: <b>{{ store.current.items.length }}</b> / <b>{{ store.current.expectedQty }}</b></span>
+          </div>
+
+          <!-- inputs -->
+          <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 items-start">
             <!-- SKU -->
             <div class="w-full text-left">
               <div class="text-xs text-gray-500 mb-2">
@@ -980,14 +1066,15 @@ function logout() {
                   placeholder="Scan/Type SKU" @keydown.enter.prevent="onSkuEnter" />
                 <i v-if="skuVerified"
                   class="pi pi-check-circle absolute right-3 top-1/2 -translate-y-1/2 text-green-600" />
-                <div v-if="store.batchLocked" class="mt-2 text-xs text-orange-600">
-                  Batch is full. Please confirm or reset the batch to continue.
-                </div>
+              </div>
 
-                <div v-if="store.current.items.length >= store.current.expectedQty && store.current.expectedQty > 0"
-                  class="mt-2 text-xs text-green-600">
-                  Expected quantity reached. Scanning is complete.
-                </div>
+              <div v-if="store.batchLocked" class="mt-2 text-xs text-orange-600">
+                Batch is full. Please confirm or reset the batch to continue.
+              </div>
+
+              <div v-if="store.current.items.length >= store.current.expectedQty && store.current.expectedQty > 0"
+                class="mt-2 text-xs text-green-600">
+                Expected quantity reached. Scanning is complete.
               </div>
             </div>
 
@@ -1008,111 +1095,59 @@ function logout() {
               </div>
             </div>
 
-            <!-- LIST (Batch-wise) -->
-            <div class="w-full">
-              <div class="text-xs text-gray-500 mb-2">
-                Current items ({{ store.pendingCount }} / {{ store.batchSize }})
-              </div>
+            <!-- spacer on desktop -->
+            <div class="hidden md:block"></div>
+          </div>
+        </div>
 
-              <div class="border border-gray-200 bg-gray-50 p-3 h-40 overflow-auto text-xs rounded-2xl">
-                <div v-for="item in store.pendingItems" :key="item.serial"
-                  class="flex items-start justify-between gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 mb-2">
-                  <div class="flex flex-col">
-                    <span class="font-semibold">SKU: {{ item.sku }}</span>
-                    <span class="font-mono text-gray-600">SN: {{ item.serial }}</span>
-                  </div>
+        <!-- ACTION BUTTONS -->
+        <div class="mt-4 flex flex-col gap-3 sm:hidden">
+          <div class="grid grid-cols-2 gap-3">
+            <button class="rounded-xl py-3 text-sm text-white w-full"
+              :class="store.canConfirmBatch ? 'bg-gray-900 hover:opacity-90' : 'bg-gray-400 cursor-not-allowed'"
+              :disabled="!store.canConfirmBatch" @click="onConfirmBatch">
+              Confirm Batch
+            </button>
 
-                  <div class="flex items-center gap-2">
-                    <i class="pi pi-check text-green-600 mt-1" />
-
-                    <!-- ✅ Delete only for pending (always allowed here) -->
-                    <button class="text-gray-400 hover:text-red-600" @click="store.deletePendingItem(item.serial)"
-                      title="Delete">
-                      <i class="pi pi-trash text-xs" />
-                    </button>
-                  </div>
-                </div>
-
-                <div v-if="store.pendingItems.length === 0" class="text-gray-400 text-center py-10">
-                  No items in current batch
-                </div>
-              </div>
-
-              <!-- ✅ Small summary (no long list) -->
-              <div class="mt-2 text-[11px] text-gray-500 flex justify-between">
-                <span>Confirmed: <b>{{ store.confirmedCount }}</b></span>
-                <span>Total scanned: <b>{{ store.current.items.length }}</b> / <b>{{ store.current.expectedQty
-                }}</b></span>
-              </div>
-            </div>
-
-            <!-- ACTION BUTTONS -->
-
-            <!-- ✅ Mobile: Scan Complete full-width at bottom -->
-            <div class="mt-4 flex flex-col gap-3 sm:hidden">
-              <div class="grid grid-cols-2 gap-3">
-                <button class="rounded-xl py-3 text-sm text-white w-full"
-                  :class="store.canConfirmBatch ? 'bg-gray-900 hover:opacity-90' : 'bg-gray-400 cursor-not-allowed'"
-                  :disabled="!store.canConfirmBatch" @click="onConfirmBatch">
-                  Confirm Batch
-                </button>
-
-
-                <button class="rounded-xl py-3 text-sm text-white w-full"
-                  :class="store.pendingCount > 0 ? 'bg-orange-500 hover:opacity-90' : 'bg-gray-300 cursor-not-allowed'"
-                  :disabled="store.pendingCount === 0" @click="store.resetBatch()">
-                  Reset Batch
-                </button>
-              </div>
-
-              <button v-if="store.canShowScanComplete"
-                class="w-full rounded-xl bg-blue-600 text-white py-3 text-sm hover:opacity-90 disabled:opacity-50"
-                :disabled="!store.canEnableScanComplete" @click="scanCompleteAndGoConfirm">
-                Scan Complete
-              </button>
-            </div>
-
-            <!-- Desktop actions -->
-            <div class="mt-6 hidden sm:flex w-full items-center justify-between gap-4">
-              <!-- left group -->
-              <div class="flex items-center gap-3">
-                <button class="rounded-xl py-3 text-sm text-white px-6"
-                  :class="store.canConfirmBatch ? 'bg-gray-900 hover:opacity-90' : 'bg-gray-400 cursor-not-allowed'"
-                  :disabled="!store.canConfirmBatch" @click="onConfirmBatch">
-                  Confirm Batch
-                </button>
-
-
-                <button class="rounded-xl py-3 text-sm text-white px-6"
-                  :class="store.pendingCount > 0 ? 'bg-orange-500 hover:opacity-90' : 'bg-gray-300 cursor-not-allowed'"
-                  :disabled="store.pendingCount === 0" @click="store.resetBatch()">
-                  Reset Batch
-                </button>
-              </div>
-
-              <!-- right button -->
-              <button v-if="store.canShowScanComplete"
-                class="rounded-xl bg-blue-600 text-white py-3 text-sm hover:opacity-90 disabled:opacity-50 px-8"
-                :disabled="!store.canEnableScanComplete" @click="scanCompleteAndGoConfirm">
-                Scan Complete
-              </button>
-            </div>
+            <button class="rounded-xl py-3 text-sm text-white w-full"
+              :class="store.pendingCount > 0 ? 'bg-orange-500 hover:opacity-90' : 'bg-gray-300 cursor-not-allowed'"
+              :disabled="store.pendingCount === 0" @click="onresetBatch()">
+              Reset Batch
+            </button>
           </div>
 
-          <!-- actions -->
-          <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 mt-6">
+          <button v-if="store.canShowScanComplete"
+            class="w-full rounded-xl bg-blue-600 text-white py-3 text-sm hover:opacity-90 disabled:opacity-50"
+            :disabled="!store.canEnableScanComplete" @click="scanCompleteAndGoConfirm">
+            Scan Complete
+          </button>
+        </div>
 
+        <div class="mt-6 hidden sm:flex w-full items-center justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <button class="rounded-xl py-3 text-sm text-white px-6"
+              :class="store.canConfirmBatch ? 'bg-gray-900 hover:opacity-90' : 'bg-gray-400 cursor-not-allowed'"
+              :disabled="!store.canConfirmBatch" @click="onConfirmBatch">
+              Confirm Batch
+            </button>
 
-            <!-- <button class="w-full sm:w-28 rounded-xl bg-orange-500 text-white py-3 text-sm hover:opacity-90"
-              @click="confirmResetCurrentInnerbox">
-              Reset
-            </button> -->
+            <button class="rounded-xl py-3 text-sm text-white px-6"
+              :class="store.pendingCount > 0 ? 'bg-orange-500 hover:opacity-90' : 'bg-gray-300 cursor-not-allowed'"
+              :disabled="store.pendingCount === 0" @click="onresetBatch()">
+              Reset Batch
+            </button>
           </div>
+
+          <button v-if="store.canShowScanComplete"
+            class="rounded-xl bg-blue-600 text-white py-3 text-sm hover:opacity-90 disabled:opacity-50 px-8"
+            :disabled="!store.canEnableScanComplete" @click="scanCompleteAndGoConfirm">
+            Scan Complete
+          </button>
         </div>
       </div>
     </div>
 
-    <!-- CONFIRM (show saved/scanned data, no stat cards) -->
+    <!-- CONFIRM -->
     <div v-if="step === 'CONFIRM'" class="px-4 py-6">
       <div class="mx-auto max-w-5xl">
         <div class="flex items-start justify-between gap-3">
@@ -1121,17 +1156,12 @@ function logout() {
             <div class="text-sm text-gray-500 mt-1">Review the scanned data below before confirming.</div>
           </div>
 
-          <div class="text-xs text-gray-500">
-            Operator: <span class="font-semibold text-gray-800">{{ store.operatorName }}</span>
-          </div>
-
-          <div class="text-xs border border-gray-200 bg-white px-3 py-2 rounded-xl shadow-sm">
-            <div class="text-gray-500">Date</div>
-            <div class="font-semibold">{{ dateLabel }}</div>
-          </div>
+            <div class="shrink-0 text-[10px] border border-gray-200 bg-white px-2 py-1 rounded-lg">
+              <span class="text-gray-500">Date</span>
+              <span class="font-semibold text-gray-900 ml-1">{{ dateLabel }}</span>
+            </div>
         </div>
 
-        <!-- summary -->
         <div class="mt-6 bg-white border border-gray-200 rounded-2xl shadow-sm p-5 sm:p-6">
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
@@ -1146,14 +1176,11 @@ function logout() {
 
             <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
               <div class="text-[11px] text-gray-500 uppercase tracking-wide">Quantity</div>
-              <div class="mt-1 text-lg font-semibold">
-                {{ confirmSummary.scanned }} / {{ confirmSummary.qty }}
-              </div>
+              <div class="mt-1 text-lg font-semibold">{{ confirmSummary.scanned }} / {{ confirmSummary.qty }}</div>
               <div class="text-[11px] text-gray-500 mt-1">Scanned / Expected</div>
             </div>
           </div>
 
-          <!-- items -->
           <div class="mt-6">
             <div class="text-sm font-semibold">Scanned Items</div>
             <div class="text-xs text-gray-500 mt-1">SKU & Serial numbers saved for this InnerBox.</div>
@@ -1178,7 +1205,6 @@ function logout() {
             </div>
           </div>
 
-          <!-- actions -->
           <div class="flex flex-col sm:flex-row justify-center gap-3 sm:gap-6 mt-6">
             <button class="w-full sm:w-28 rounded-xl bg-orange-500 text-white py-3 text-sm hover:opacity-90"
               @click="confirmResetCurrentInnerbox">

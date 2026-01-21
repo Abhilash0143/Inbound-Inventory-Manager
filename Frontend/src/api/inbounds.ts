@@ -108,3 +108,15 @@ export function deleteBatchItems(payload: {
 }) {
   return api.post("/inbounds/items/delete-batch", payload);
 }
+
+export async function deleteInboundItems(
+  sessionId: number | string,
+  packedBy: string,
+  serialNumbers: string[]
+) {
+  return api.post("/inbounds/items/delete-batch", {
+    sessionId: Number(sessionId),
+    packedBy,
+    serialNumbers,
+  });
+}

@@ -4,6 +4,8 @@ import { isValidSku } from "../utils/skuValidator";
 import { claimSession, createInboundItem, completeSession, heartbeat as apiHeartbeat } from "../src/api/inbounds";
 import { resetSession } from "../src/api/inbounds";
 import { deleteBatchItems } from "../src/api/inbounds";
+import { deleteInboundItems } from "../src/api/inbounds"; 
+
 
 export type ScannedItem = {
   sku: string;
@@ -116,14 +118,22 @@ export const useInboundStore = defineStore("inbound", {
     return q > 0 ? Math.ceil(q / this.batchSize) : 0;
   },
 
-  currentBatchIndex(): number {
-    const confirmed = this.confirmedCount || 0;
-    return this.batchSize > 0 ? Math.floor(confirmed / this.batchSize) + 1 : 1;
-  },
+currentBatchIndex(): number {
+  const total = this.totalBatches || 0;
+  if (total <= 0) return 1;
 
-  isLastBatch(): boolean {
-    return this.totalBatches > 0 && this.currentBatchIndex === this.totalBatches;
-  },
+  const confirmed = this.confirmedCount || 0;
+  const idx = this.batchSize > 0 ? Math.floor(confirmed / this.batchSize) + 1 : 1;
+
+  // ✅ clamp so it never becomes total+1
+  return Math.min(idx, total);
+},
+
+isLastBatch(): boolean {
+  const total = this.totalBatches || 0;
+  return total > 0 && this.currentBatchIndex === total;
+},
+
 
   canShowScanComplete(): boolean {
     return this.isLastBatch;
@@ -448,10 +458,10 @@ async deletePendingItem(serial: string) {
   }
 
   try {
-    // ✅ Backend delete
-    // await deleteInboundItems(this.sessionId, this.operatorName, [serial]);
+    // ✅ Backend delete (THIS IS THE FIX)
+    await deleteInboundItems(this.sessionId, this.operatorName, [serial]);
 
-    // ✅ Local delete
+    // ✅ Local delete after backend success
     this.current.items.splice(idx, 1);
 
     // if batch was full, unlock after delete
@@ -465,6 +475,7 @@ async deletePendingItem(serial: string) {
     return false;
   }
 },
+
 
     /**
      * ✅ Keeps session lock alive while scanning
